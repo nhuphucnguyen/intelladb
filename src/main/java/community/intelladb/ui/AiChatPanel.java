@@ -264,9 +264,9 @@ public final class AiChatPanel extends JPanel implements Disposable {
         input.setWrapStyleWord(true);
         input.setBorder(JBUI.Borders.empty(6, 8));
         // The placeholder replaces the old welcome message in the transcript.
-        input.getEmptyText().setText("Ask about your database in plain English — e.g. “Which customers ordered the most?”");
-        input.getEmptyText().appendLine("Enter to send · Shift+Enter for a new line",
-                com.intellij.ui.SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES, null);
+        // Short enough to fit the one-line input; the key hint moves to the tooltip.
+        input.getEmptyText().setText("Ask me about your DB");
+        input.setToolTipText("Enter to send · Shift+Enter for a new line");
         JBScrollPane inputScroll = new JBScrollPane(input);
         inputScroll.setBorder(JBUI.Borders.empty());
 
