@@ -174,7 +174,8 @@ public final class AiChatPanel extends JPanel implements Disposable {
                 AllIcons.General.Settings) {
             @Override
             public void actionPerformed(@NotNull AnActionEvent e) {
-                ShowSettingsUtil.getInstance().showSettingsDialog(project, "community.intelladb.ai.provider");
+                ShowSettingsUtil.getInstance().showSettingsDialog(project,
+                        community.intelladb.settings.AiProviderConfigurable.class);
             }
         });
         ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar("IntellaDbAiChat", group, true);
@@ -778,7 +779,8 @@ public final class AiChatPanel extends JPanel implements Disposable {
                     AllIcons.General.Settings) {
                 @Override
                 public void actionPerformed(@NotNull AnActionEvent e) {
-                    ShowSettingsUtil.getInstance().showSettingsDialog(project, "community.intelladb.ai.provider");
+                    ShowSettingsUtil.getInstance().showSettingsDialog(project,
+                            community.intelladb.settings.AiProviderConfigurable.class);
                 }
             });
             return group;
