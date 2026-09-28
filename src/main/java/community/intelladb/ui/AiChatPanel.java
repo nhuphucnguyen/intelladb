@@ -1,6 +1,7 @@
 package community.intelladb.ui;
 
 import com.intellij.icons.AllIcons;
+import com.intellij.ide.BrowserUtil;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.ide.CopyPasteManager;
@@ -12,12 +13,14 @@ import com.intellij.openapi.ui.ComboBox;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.components.JBTextArea;
+import com.intellij.util.ui.HTMLEditorKitBuilder;
 import com.intellij.util.ui.JBUI;
 import community.intelladb.ai.AiAssistant;
 import community.intelladb.ai.AiCredentials;
 import community.intelladb.ai.AiException;
 import community.intelladb.ai.AiSettings;
 import community.intelladb.ai.ChatMessage;
+import community.intelladb.ai.MarkdownToHtml;
 import community.intelladb.ai.OpenAiCompatibleClient;
 import community.intelladb.connection.DbConfig;
 import community.intelladb.connection.DbSession;
@@ -29,11 +32,13 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JEditorPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JScrollBar;
 import javax.swing.JTextArea;
 import javax.swing.KeyStroke;
+import javax.swing.event.HyperlinkEvent;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -91,6 +96,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
         transcript.setBorder(JBUI.Borders.empty(4, 4, 8, 4));
         scrollPane = new JBScrollPane(transcript);
         scrollPane.setBorder(null);
+        scrollPane.setHorizontalScrollBarPolicy(javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         scrollPane.getVerticalScrollBar().setUnitIncrement(16);
         add(scrollPane, BorderLayout.CENTER);
         add(buildInputArea(), BorderLayout.SOUTH);
@@ -204,6 +210,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
         transcript.revalidate();
         transcript.repaint();
         ApplicationManager.getApplication().invokeLater(() -> {
+            scrollPane.getHorizontalScrollBar().setValue(0);
             JScrollBar bar = scrollPane.getVerticalScrollBar();
             bar.setValue(bar.getMaximum());
         });
@@ -368,20 +375,18 @@ public final class AiChatPanel extends JPanel implements Disposable {
     }
 
     private @NotNull JPanel assistantAnswerRow(@NotNull String answer, @Nullable String sql, @NotNull DbConfig forConfig) {
-        JComponent body;
-        JPanel row;
+        JPanel stack = new JPanel();
+        stack.setLayout(new javax.swing.BoxLayout(stack, javax.swing.BoxLayout.Y_AXIS));
+        stack.setOpaque(false);
         if (sql == null || sql.isBlank()) {
-            body = body(answer);
-            row = bubble("Intella DB AI (" + settingsLabel() + ")", body, false);
+            stack.add(markdownBody(answer));
         } else {
-            String prose = answer.substring(0, answer.indexOf(sql) >= 0
-                    ? Math.max(0, answer.indexOf("```"))
-                    : answer.length()).trim();
-            JPanel stack = new JPanel();
-            stack.setLayout(new javax.swing.BoxLayout(stack, javax.swing.BoxLayout.Y_AXIS));
-            stack.setOpaque(false);
-            if (!prose.isBlank()) {
-                stack.add(body(prose));
+            int fence = answer.indexOf("```");
+            String before = answer.substring(0, Math.max(0, fence)).trim();
+            int close = fence >= 0 ? answer.indexOf("```", fence + 3) : -1;
+            String after = close >= 0 ? answer.substring(close + 3).trim() : "";
+            if (!before.isBlank()) {
+                stack.add(markdownBody(before));
             }
             stack.add(sqlBlock(sql));
             JPanel actions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 2));
@@ -396,9 +401,62 @@ public final class AiChatPanel extends JPanel implements Disposable {
             actions.add(toConsole);
             actions.add(copy);
             stack.add(actions);
-            row = bubble("Intella DB AI (" + settingsLabel() + ")", stack, false);
+            if (!after.isBlank()) {
+                stack.add(markdownBody(after));
+            }
         }
-        return row;
+        return bubble("Intella DB AI (" + settingsLabel() + ")", stack, false);
+    }
+
+    /** Renders an answer (or its prose parts) as markdown: paragraphs, lists, code fences. */
+    private @NotNull JComponent markdownBody(@NotNull String markdown) {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setOpaque(false);
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = 0;
+        gbc.gridy = GridBagConstraints.RELATIVE;
+        gbc.weightx = 1.0;
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.insets = new Insets(0, 0, 6, 0);
+        for (MarkdownToHtml.Block block : MarkdownToHtml.split(markdown)) {
+            JComponent child;
+            if (block instanceof MarkdownToHtml.Code code) {
+                child = sqlBlock(code.text());
+            } else if (block instanceof MarkdownToHtml.Paragraph paragraph) {
+                child = htmlParagraph(paragraph.html());
+            } else {
+                continue;
+            }
+            panel.add(child, gbc);
+        }
+        return panel;
+    }
+
+    /** Swing-HTML paragraph with the platform's word-wrap kit; hyperlinks open in the browser. */
+    private @NotNull JComponent htmlParagraph(@NotNull String innerHtml) {
+        JEditorPane pane = new JEditorPane();
+        pane.setEditorKit(new HTMLEditorKitBuilder().withWordWrapViewFactory().build());
+        pane.setText("<html><head></head><body style=\"text-align:left\">" + innerHtml + "</body></html>");
+        pane.setEditable(false);
+        pane.setOpaque(false);
+        pane.setBorder(null);
+        pane.setForeground(JBUI.CurrentTheme.Label.foreground());
+        pane.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, true);
+        pane.setFont(JBUI.Fonts.label(13));
+        pane.setFocusable(false);
+        // Measure the wrapped height at the width the bubble will actually give us.
+        int width = Math.max(120, bubbleTextWidth());
+        pane.setSize(width, Integer.MAX_VALUE);
+        Dimension size = new Dimension(width, pane.getPreferredSize().height);
+        pane.setPreferredSize(size);
+        pane.setMinimumSize(size);
+        pane.addHyperlinkListener(e -> {
+            if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED && e.getURL() != null) {
+                BrowserUtil.browse(e.getURL());
+            }
+        });
+        return pane;
     }
 
     /** Runs the SQL and appends the result table into the conversation. */
@@ -495,16 +553,15 @@ public final class AiChatPanel extends JPanel implements Disposable {
 
     private int bubbleTextWidth() {
         // Used for components created after the window is visible (bodies, SQL blocks,
-        // result tables). The panel's own width is never inflated by content, unlike
-        // the scroll viewport.
+        // result tables). Horizontal scrolling is off, so the viewport cannot be widened
+        // by content; it is the real usable width.
+        int viewport = scrollPane.getViewport().getWidth();
         int host = getWidth();
-        if (host < 120) {
-            host = scrollPane.getViewport().getWidth();
-        }
-        if (host < 120) {
+        int base = viewport >= 120 ? viewport : (host >= 120 ? host : 0);
+        if (base < 120) {
             return BUBBLE_TEXT_WIDTH;
         }
-        return Math.max(220, Math.min(680, host - 56));
+        return Math.max(200, Math.min(680, base - 56));
     }
 
     /**
@@ -542,6 +599,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
         JTextArea area = new JTextArea(sql);
         area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, area.getFont().getSize()));
         area.setEditable(false);
+        area.setFocusable(false);
         area.setLineWrap(false);
         area.setBackground(SQL_BLOCK);
         area.setBorder(JBUI.Borders.empty(4, 6));
@@ -557,7 +615,11 @@ public final class AiChatPanel extends JPanel implements Disposable {
         area.setColumns(columns);
         JScrollPane scroller = new JScrollPane(area);
         scroller.setBorder(BorderFactory.createLineBorder(BUBBLE_BORDER));
-        scroller.setPreferredSize(new Dimension(bubbleTextWidth(), area.getPreferredSize().height + 12));
+        Dimension size = new Dimension(bubbleTextWidth(), area.getPreferredSize().height + 12);
+        scroller.setPreferredSize(size);
+        // GridBag compresses rows down to their minimum when the transcript slightly
+        // overflows the viewport — code blocks must not be compressible to one line.
+        scroller.setMinimumSize(size);
         return scroller;
     }
 

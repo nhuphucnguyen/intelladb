@@ -2,6 +2,12 @@
 
 ## 0.2.0
 
+### Added
+- **Markdown rendering in AI answers**: headings, **bold**, *italic*, `inline code`,
+  links (clickable), bullet lists and extra fenced code blocks now display properly
+  instead of showing raw markdown syntax. The first SQL block keeps its Run /
+  Insert into Console / Copy buttons.
+
 ### Improved
 - The password prompt (shown only when a connection has no stored credential) now offers
   "Save password in the IDE credential store" — answering once stops the prompt from
