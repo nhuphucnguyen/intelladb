@@ -61,6 +61,18 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
     private javax.swing.JComponent buildRightPane() {
         tabs = new JBTabbedPane(SwingConstants.TOP);
         tabs.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
+        tabs.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(@NotNull java.awt.event.MouseEvent e) {
+                // middle-click closes the tab under the pointer, like editor tabs
+                if (e.getButton() == java.awt.event.MouseEvent.BUTTON2) {
+                    int index = tabs.indexAtLocation(e.getX(), e.getY());
+                    if (index >= 0) {
+                        closeTab(tabs.getComponentAt(index));
+                    }
+                }
+            }
+        });
         javax.swing.JPanel right = new javax.swing.JPanel(new BorderLayout());
         right.add(tabs, BorderLayout.CENTER);
         return right;
@@ -191,10 +203,30 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         ConsolePanel existing = findConsole(config);
         if (existing == null) {
             existing = new ConsolePanel(project, this, config);
-            tabs.addTab("Console — " + config.name, AllIcons.Nodes.Console, existing);
+            addClosableTab("Console — " + config.name, AllIcons.Nodes.Console, existing);
         }
         tabs.setSelectedComponent(existing);
         return existing;
+    }
+
+    /**
+     * Adds a tab whose header carries a close (×) button — without it the work tabs
+     * (console, data preview) could never be closed.
+     */
+    private void addClosableTab(@NotNull String title, @NotNull javax.swing.Icon icon,
+                                @NotNull javax.swing.JComponent component) {
+        tabs.addTab(title, icon, component);
+        javax.swing.JPanel header = new javax.swing.JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+        header.setOpaque(false);
+        header.add(new JBLabel(title, icon, javax.swing.SwingConstants.LEFT));
+        javax.swing.JButton close = new javax.swing.JButton(AllIcons.Actions.Close);
+        close.setBorder(com.intellij.util.ui.JBUI.Borders.empty(2, 4));
+        close.setContentAreaFilled(false);
+        close.setFocusable(false);
+        close.setToolTipText("Close tab (middle-click also works)");
+        close.addActionListener(e -> closeTab(component));
+        header.add(close);
+        tabs.setTabComponentAt(tabs.indexOfComponent(component), header);
     }
 
     /** Opens (or focuses) a data-preview tab for the table and (re)loads its rows. */
@@ -203,7 +235,7 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         ResultsPanel panel = findResultsTab(title);
         if (panel == null) {
             panel = new ResultsPanel(project);
-            tabs.addTab(title, IntellaDbIcons.TABLE, panel);
+            addClosableTab(title, IntellaDbIcons.TABLE, panel);
         }
         tabs.setSelectedComponent(panel);
         table.showIn(this, panel);

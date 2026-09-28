@@ -12,6 +12,9 @@
   Insert into Console / Copy buttons.
 
 ### Fixed
+- **Tabs in the DB Explorer could not be closed** — the close action existed but nothing
+  was wired to it. Console and data-preview tabs now have a × button in their header,
+  and middle-clicking a tab closes it (like editor tabs).
 - **"Insert into Console" from the AI chat did nothing**: the document change was made
   in a bare write action, which the platform rejects outside a command
   (IncorrectOperationException) — it now runs in a WriteCommandAction and the SQL lands
