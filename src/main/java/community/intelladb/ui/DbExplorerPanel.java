@@ -202,15 +202,36 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
 
     // ------------------------------------------------------------------ tab management
 
-    /** Opens (or focuses) a SQL console tab for the connection. */
+    /** Per-connection consoles live as editor tabs; the instance survives tab close. */
+    private final java.util.Map<String, ConsolePanel> consoles = new java.util.HashMap<>();
+    private final java.util.Map<String, com.intellij.openapi.vfs.VirtualFile> consoleFiles = new java.util.HashMap<>();
+    private int consoleSeq;
+
+    /**
+     * Opens (or focuses) the SQL console for the connection as an editor tab — the way
+     * IntelliJ's database tools do it: consoles live in the editor, not in the explorer.
+     * When {@code sql} is given it replaces the console text (Insert into Console).
+     */
     public @Nullable ConsolePanel openConsole(@NotNull DbConfig config) {
-        ConsolePanel existing = findConsole(config);
-        if (existing == null) {
-            existing = new ConsolePanel(project, this, config);
-            addClosableTab("Console — " + config.name, AllIcons.Nodes.Console, existing);
+        return openConsole(config, null);
+    }
+
+    public @Nullable ConsolePanel openConsole(@NotNull DbConfig config, @Nullable String sql) {
+        ConsolePanel console = consoles.computeIfAbsent(config.id,
+                id -> new ConsolePanel(project, this, config));
+        if (sql != null) {
+            console.setSql(sql);
         }
-        tabs.setSelectedComponent(existing);
-        return existing;
+        com.intellij.openapi.vfs.VirtualFile file = consoleFiles.get(config.id);
+        if (file == null) {
+            file = new com.intellij.testFramework.LightVirtualFile(
+                    "console_" + (++consoleSeq) + ".sql @" + config.name,
+                    community.intelladb.sql.IntellaSqlFileType.INSTANCE, console.sql());
+            IntellaDbFileEditorProvider.attach(file, () -> console);
+            consoleFiles.put(config.id, file);
+        }
+        com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).openFile(file, true);
+        return console;
     }
 
     /**
@@ -275,15 +296,14 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         return aiPanel;
     }
 
-    /** Opens (or focuses) a data-preview tab for the table and (re)loads its rows. */
+    /** Opens a data-preview editor tab for the table and loads its rows. */
     public void openTableData(@NotNull TableRef table) {
-        String title = "Data — " + table.schema() + "." + table.name();
-        ResultsPanel panel = findResultsTab(title);
-        if (panel == null) {
-            panel = new ResultsPanel(project);
-            addClosableTab(title, IntellaDbIcons.TABLE, panel);
-        }
-        tabs.setSelectedComponent(panel);
+        com.intellij.testFramework.LightVirtualFile file = new com.intellij.testFramework.LightVirtualFile(
+                table.name() + " @" + table.config().name,
+                com.intellij.openapi.fileTypes.PlainTextFileType.INSTANCE, "");
+        ResultsPanel panel = new ResultsPanel(project);
+        IntellaDbFileEditorProvider.attach(file, () -> panel);
+        com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).openFile(file, true);
         table.showIn(this, panel);
     }
 
@@ -300,24 +320,6 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
                 com.intellij.openapi.util.Disposer.dispose(disposable);
             }
         }
-    }
-
-    private @Nullable ConsolePanel findConsole(@NotNull DbConfig config) {
-        for (int i = 0; i < tabs.getTabCount(); i++) {
-            if (tabs.getComponentAt(i) instanceof ConsolePanel console && console.config().id.equals(config.id)) {
-                return console;
-            }
-        }
-        return null;
-    }
-
-    private @Nullable ResultsPanel findResultsTab(@NotNull String title) {
-        for (int i = 0; i < tabs.getTabCount(); i++) {
-            if (title.equals(tabs.getTitleAt(i)) && tabs.getComponentAt(i) instanceof ResultsPanel panel) {
-                return panel;
-            }
-        }
-        return null;
     }
 
     // ------------------------------------------------------------------ helpers for children

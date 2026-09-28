@@ -3,6 +3,19 @@
 ## 0.2.0
 
 ### Changed
+- **Layout now follows IntelliJ Ultimate's database tools**:
+  - The **Database explorer** is a tree-only tool window (connections → schemas →
+    objects) with the AI chat as its one work tab.
+  - **Query consoles open as editor tabs** in the main editor ("console_1.sql
+    @<data source>"), not inside the tool window — with standard editor-tab close and
+    split behavior. One console per connection; "Insert into Console" and the toolbar
+    button jump to it.
+  - **Table data previews open as editor tabs** too ("<table> @<data source>").
+  - **The console toolbar has a schema selector** (like IntelliJ's schema combo): it
+    lists the connection's schemas and runs `SET search_path` before subsequent
+    executions; the data source is shown next to it as "@<name>".
+
+### Changed
 - **The AI Assistant now lives as a tab inside the DB Explorer** (next to SQL Console
   and data-preview tabs) instead of being a second tool-window icon in the stripe. It
   opens automatically, supports the same close/middle-click behavior as other tabs, and

@@ -18,6 +18,8 @@
         <toolWindow id="DB Explorer" anchor="right" canCloseContents="false"
                     factoryClass="community.intelladb.ui.DbToolWindowFactory"/>
 
+        <fileEditorProvider implementation="community.intelladb.ui.IntellaDbFileEditorProvider"/>
+
         <applicationService serviceImplementation="community.intelladb.ai.AiSettings"/>
 
         <applicationConfigurable parentId="tools"

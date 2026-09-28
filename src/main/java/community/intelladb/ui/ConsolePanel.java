@@ -47,6 +47,11 @@ public final class ConsolePanel extends JPanel {
     private final EditorTextField editor;
     private final ResultsPanel results;
     private final JBLabel status = new JBLabel(" ");
+    /** Schema selector — mirrors IntelliJ's console toolbar schema combo. */
+    private final com.intellij.openapi.ui.ComboBox<String> schemaCombo =
+            new com.intellij.openapi.ui.ComboBox<>();
+    /** The schema whose search_path is already applied to the shared session. */
+    private String appliedSchema;
 
     public ConsolePanel(@NotNull Project project, @NotNull DbExplorerPanel explorer, @NotNull DbConfig config) {
         super(new BorderLayout());
@@ -83,6 +88,8 @@ public final class ConsolePanel extends JPanel {
                 KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, InputEvent.CTRL_DOWN_MASK)), editor);
         run.registerCustomShortcutSet(new CustomShortcutSet(
                 KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, InputEvent.META_DOWN_MASK)), editor);
+        refreshSchemaCombo();
+        schemaCombo.addActionListener(e -> appliedSchema = null); // re-apply on next run
     }
 
     public @NotNull DbConfig config() {
@@ -124,7 +131,20 @@ public final class ConsolePanel extends JPanel {
         ActionToolbar toolbar = ActionManager.getInstance()
                 .createActionToolbar("IntellaDbConsole-" + config.id, group, true);
         toolbar.setTargetComponent(this);
-        return toolbar.getComponent();
+
+        // Right side of the console bar: schema selector + data source, like IntelliJ.
+        JPanel bar = new JPanel(new BorderLayout());
+        bar.add(toolbar.getComponent(), BorderLayout.WEST);
+        JPanel selectors = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 4, 0));
+        selectors.setOpaque(false);
+        schemaCombo.setToolTipText("Default schema for this console (sets search_path before runs)");
+        schemaCombo.setPreferredSize(JBUI.size(220, 26));
+        selectors.add(schemaCombo);
+        JBLabel source = new JBLabel("@" + config.name);
+        source.setBorder(JBUI.Borders.emptyLeft(8));
+        selectors.add(source);
+        bar.add(selectors, BorderLayout.CENTER);
+        return bar;
     }
 
     private final class RunAction extends AnAction {
@@ -149,7 +169,40 @@ public final class ConsolePanel extends JPanel {
             return;
         }
         status.setText("Connecting…");
-        explorer.withSession(config, session -> execute(session, script));
+        explorer.withSession(config, session -> {
+            refreshSchemaCombo();
+            applySelectedSchema(session);
+            execute(session, script);
+        });
+    }
+
+    /** Fills the schema combo from the session catalog (no-op while disconnected). */
+    private void refreshSchemaCombo() {
+        DbSession session = explorer.sessionOf(config);
+        if (session == null || session.catalog() == null) {
+            return;
+        }
+        String current = (String) schemaCombo.getEditor().getItem();
+        schemaCombo.removeAllItems();
+        for (community.intelladb.schema.SchemaCatalog.Schema schema : session.catalog().schemas()) {
+            schemaCombo.addItem(schema.name());
+        }
+        if (current != null) {
+            schemaCombo.setSelectedItem(current);
+        } else if (schemaCombo.getItemCount() > 0) {
+            schemaCombo.setSelectedItem("public"); // Postgres default, when present
+        }
+    }
+
+    /** Runs SET search_path when the combo selection differs from what the session has. */
+    private void applySelectedSchema(@NotNull DbSession session) {
+        String selected = (String) schemaCombo.getSelectedItem();
+        if (selected == null || selected.equals(appliedSchema)) {
+            return;
+        }
+        session.execute("SET search_path TO "
+                + community.intelladb.schema.IdentifierQuoting.quote(selected));
+        appliedSchema = selected;
     }
 
     private void execute(@NotNull DbSession session, @NotNull String script) {
