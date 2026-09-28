@@ -14,7 +14,9 @@
 ### Fixed
 - **Tabs in the DB Explorer could not be closed** — the close action existed but nothing
   was wired to it. Console and data-preview tabs now have a × button in their header,
-  and middle-clicking a tab closes it (like editor tabs).
+  and middle-clicking a tab closes it (like editor tabs). Each tab header is drawn as a
+  bordered pill (theme border color) with a filled background for the selected tab, and
+  clicking a header switches to that tab.
 - **"Insert into Console" from the AI chat did nothing**: the document change was made
   in a bare write action, which the platform rejects outside a command
   (IncorrectOperationException) — it now runs in a WriteCommandAction and the SQL lands
