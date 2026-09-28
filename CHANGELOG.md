@@ -3,6 +3,10 @@
 ## 0.2.0
 
 ### Improved
+- The password prompt (shown only when a connection has no stored credential) now offers
+  "Save password in the IDE credential store" — answering once stops the prompt from
+  reappearing on every IDE start. Credentials are reused automatically: live session →
+  in-memory password for this IDE run → PasswordSafe.
 - AI Assistant chat visuals reworked: rounded, antialiased bubbles with theme-aware
   colors that keep clear contrast in dark themes (the assistant bubble previously used
   the same color as the panel background and was effectively invisible).

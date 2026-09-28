@@ -65,7 +65,9 @@ public final class SessionOpener {
 
     /**
      * Runs {@code action} on the EDT with a live session for {@code config}, connecting
-     * (and prompting for a password) when needed.
+     * (and prompting for a password) when needed. Credentials are reused in this order:
+     * live session → in-memory password for this IDE run → PasswordSafe (when the
+     * connection was saved with "save password").
      */
     public void withSession(@NotNull DbConfig config, @NotNull Consumer<DbSession> action) {
         DbSession existing = manager.session(config.id);
@@ -81,13 +83,22 @@ public final class SessionOpener {
                 return;
             }
             ApplicationManager.getApplication().invokeLater(() -> {
-                String typed = Messages.showPasswordDialog(project,
-                        "Password for " + config.user + "@" + config.describe(),
-                        "Connect to " + config.dialect().displayName(), Messages.getQuestionIcon());
-                if (typed == null) {
+                community.intelladb.ui.PasswordPromptDialog prompt =
+                        new community.intelladb.ui.PasswordPromptDialog(project, config);
+                if (!prompt.showAndGet()) {
                     return;
                 }
-                manager.rememberPasswordInMemory(config, typed);
+                String typed = prompt.password();
+                if (typed.isBlank()) {
+                    return;
+                }
+                if (prompt.rememberPassword()) {
+                    // Persists to the PasswordSafe and flips the connection to
+                    // savePassword=true, so this prompt does not come back.
+                    manager.rememberPassword(config, typed);
+                } else {
+                    manager.rememberPasswordInMemory(config, typed);
+                }
                 connectInBackground(config, typed, action);
             });
         });

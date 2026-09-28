@@ -139,6 +139,15 @@ public final class ConnectionManager implements PersistentStateComponent<Connect
         memoryPasswords.put(config.id, password);
     }
 
+    /**
+     * Stores the password in the PasswordSafe and marks the connection to save passwords,
+     * so interactive prompts stay a one-time event for this connection.
+     */
+    public void rememberPassword(@NotNull DbConfig config, @NotNull String password) {
+        config.savePassword = true;
+        saveConfig(config, password, true);
+    }
+
     // ------------------------------------------------------------------ sessions
 
     /** Returns the live session, or null when not connected. */
