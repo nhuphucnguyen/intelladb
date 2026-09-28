@@ -55,8 +55,9 @@ class DdlGeneratorTest {
         assertEquals("jdbc:postgresql://db.example.com:5433/shop",
                 new PostgresDialect().jdbcUrl(config));
         config.sslMode = true;
-        assertEquals("jdbc:postgresql://db.example.com:5433/shop?sslmode=require",
-                new PostgresDialect().jdbcUrl(config));
+        // SSL travels as driver properties, keeping the URL as the user typed it.
+        assertEquals("jdbc:postgresql://db.example.com:5433/shop", new PostgresDialect().jdbcUrl(config));
+        assertEquals("require", new PostgresDialect().connectionProperties(config).getProperty("sslmode"));
         config.jdbcUrlOverride = "jdbc:postgresql://other/db?opt=1";
         assertEquals("jdbc:postgresql://other/db?opt=1", new PostgresDialect().jdbcUrl(config));
     }

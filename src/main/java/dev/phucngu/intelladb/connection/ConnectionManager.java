@@ -3,12 +3,14 @@ package dev.phucngu.intelladb.connection;
 import com.intellij.credentialStore.CredentialAttributes;
 import com.intellij.credentialStore.Credentials;
 import com.intellij.ide.passwordSafe.PasswordSafe;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.Service;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.project.Project;
+import com.intellij.util.concurrency.AppExecutorUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -16,7 +18,10 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Project-level store of saved connections plus the live {@link DbSession}s.
@@ -25,7 +30,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 @Service(Service.Level.PROJECT)
 @State(name = "IntellaDbConnections", storages = @Storage("intella-db.xml"))
-public final class ConnectionManager implements PersistentStateComponent<ConnectionManager.State> {
+public final class ConnectionManager implements PersistentStateComponent<ConnectionManager.State>, Disposable {
 
     /** XML-serializable state (public fields, no passwords). */
     public static final class State {
@@ -34,13 +39,19 @@ public final class ConnectionManager implements PersistentStateComponent<Connect
 
     private final Project project;
     private final State state = new State();
-    private final Map<String, DbSession> sessions = new HashMap<>();
+    /** Concurrent: connects run on pooled threads, housekeeping on the scheduler. */
+    private final Map<String, DbSession> sessions = new ConcurrentHashMap<>();
     /** Session-only passwords for configs with savePassword=false. */
     private final Map<String, String> memoryPasswords = new HashMap<>();
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
 
+    /** Keep-alive pings and auto-disconnects; checked every few seconds against each session. */
+    private final ScheduledFuture<?> housekeeping;
+
     public ConnectionManager(@NotNull Project project) {
         this.project = project;
+        this.housekeeping = AppExecutorUtil.getAppScheduledExecutorService()
+                .scheduleWithFixedDelay(this::housekeep, 5, 5, TimeUnit.SECONDS);
     }
 
     public static @NotNull ConnectionManager getInstance(@NotNull Project project) {
@@ -78,8 +89,9 @@ public final class ConnectionManager implements PersistentStateComponent<Connect
                 memoryPasswords.remove(config.id);
             } else {
                 clearPassword(config.id);
+                memoryPasswords.remove(config.id);
                 if (password != null && !password.isBlank()) {
-                    memoryPasswords.put(config.id, password);
+                    rememberPasswordInMemory(config, password);
                 }
             }
         }
@@ -134,9 +146,14 @@ public final class ConnectionManager implements PersistentStateComponent<Connect
         }
     }
 
-    /** Remembers a password typed interactively (in memory only, for this IDE run). */
+    /**
+     * Remembers a password typed interactively (in memory only, for this IDE run) — unless
+     * the connection is set to never remember it, so every connect asks again.
+     */
     public void rememberPasswordInMemory(@NotNull DbConfig config, @NotNull String password) {
-        memoryPasswords.put(config.id, password);
+        if (!config.neverRememberPassword) {
+            memoryPasswords.put(config.id, password);
+        }
     }
 
     /**
@@ -145,6 +162,7 @@ public final class ConnectionManager implements PersistentStateComponent<Connect
      */
     public void rememberPassword(@NotNull DbConfig config, @NotNull String password) {
         config.savePassword = true;
+        config.neverRememberPassword = false;
         saveConfig(config, password, true);
     }
 
@@ -170,7 +188,7 @@ public final class ConnectionManager implements PersistentStateComponent<Connect
         session.loadCatalog();
         sessions.put(config.id, session);
         if (password != null && !config.savePassword) {
-            memoryPasswords.put(config.id, password);
+            rememberPasswordInMemory(config, password);
         }
         fireChanged();
         return session;
@@ -193,6 +211,34 @@ public final class ConnectionManager implements PersistentStateComponent<Connect
     // ------------------------------------------------------------------ change notification
 
     /** Listener runs on the EDT. */
+    // ------------------------------------------------------------------ keep-alive & auto-disconnect
+
+    private void housekeep() {
+        for (DbSession session : List.copyOf(sessions.values())) {
+            DbConfig config = session.config();
+            if (session.isBusy() || !session.isOpen()) {
+                continue;
+            }
+            if (config.autoDisconnect && config.autoDisconnectSeconds > 0
+                    && session.idleMillis() >= config.autoDisconnectSeconds * 1000L) {
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    if (sessions.get(config.id) == session && !session.isBusy()) {
+                        disconnect(config.id);
+                    }
+                });
+            } else if (config.keepAlive && config.keepAliveSeconds > 0
+                    && session.millisSincePing() >= config.keepAliveSeconds * 1000L) {
+                // Pooled: a ping waits behind a running statement and must not stall the scheduler.
+                ApplicationManager.getApplication().executeOnPooledThread(session::ping);
+            }
+        }
+    }
+
+    @Override
+    public void dispose() {
+        housekeeping.cancel(false);
+    }
+
     public void addListener(@NotNull Runnable listener) {
         listeners.add(listener);
     }

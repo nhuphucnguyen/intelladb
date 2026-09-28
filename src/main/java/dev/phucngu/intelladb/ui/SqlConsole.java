@@ -88,7 +88,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
     private final Document document;
     private final ExecutionMarkers markers;
 
-    private TxMode txMode = TxMode.AUTO;
+    private TxMode txMode;
     private RunMode runMode = RunMode.PLAYGROUND;
     private @Nullable String schema;
     /** Header toolbars of this console's open editors, refreshed when the schema changes. */
@@ -100,6 +100,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         this.project = project;
         this.explorer = explorer;
         this.config = config;
+        this.txMode = config.autoCommit ? TxMode.AUTO : TxMode.MANUAL;
         this.file = new LightVirtualFile("console.sql", IntellaSqlFileType.INSTANCE,
                 "-- SQL for " + config.describe() + "\n");
         file.putUserData(KEY, this);

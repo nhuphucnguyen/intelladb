@@ -75,6 +75,10 @@ public final class SessionOpener {
             action.accept(existing);
             return;
         }
+        if (config.noAuth) {
+            connectInBackground(config, null, action);
+            return;
+        }
         // PasswordSafe access must not run on the EDT.
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             String password = manager.readPassword(config);
@@ -104,7 +108,7 @@ public final class SessionOpener {
         });
     }
 
-    private void connectInBackground(@NotNull DbConfig config, @NotNull String password,
+    private void connectInBackground(@NotNull DbConfig config, @Nullable String password,
                                      @NotNull Consumer<DbSession> action) {
         fire(listener -> listener.connecting(config));
         ApplicationManager.getApplication().executeOnPooledThread(() -> {

@@ -29,6 +29,9 @@ public final class DbSession implements AutoCloseable {
     private volatile String serverVersion = "";
     /** Statement currently executing, so {@link #cancel()} can interrupt it from another thread. */
     private volatile Statement running;
+    /** Last user activity (statements, introspection) — keep-alive pings don't count. */
+    private volatile long lastActivity = System.currentTimeMillis();
+    private volatile long lastPing = System.currentTimeMillis();
 
     public DbSession(@NotNull DbConfig config, @Nullable String password) {
         this.config = config;
@@ -69,17 +72,7 @@ public final class DbSession implements AutoCloseable {
         if (isOpen()) {
             return;
         }
-        dialect.loadDriver();
-        Properties props = new Properties();
-        if (!config.user.isBlank()) {
-            props.setProperty("user", config.user);
-        }
-        if (password != null && !password.isBlank()) {
-            props.setProperty("password", password);
-        }
-        props.setProperty("loginTimeout", "10");
-        props.setProperty("connectTimeout", "10");
-        connection = DriverManager.getConnection(dialect.jdbcUrl(config), props);
+        connection = open(config, password, 10);
         try (Statement st = connection.createStatement();
              ResultSet rs = st.executeQuery("select version()")) {
             if (rs.next()) {
@@ -90,11 +83,89 @@ public final class DbSession implements AutoCloseable {
     }
 
     /**
+     * Opens a JDBC connection with every connection setting applied: credentials, SSL and
+     * the user's driver properties, then read-only, time zone and the startup script.
+     * Shared by sessions and the dialog's Test Connection.
+     */
+    public static @NotNull Connection open(@NotNull DbConfig config, @Nullable String password, int timeoutSeconds)
+            throws SQLException {
+        DbDialect dialect = config.dialect();
+        dialect.loadDriver();
+        Properties props = new Properties();
+        props.setProperty("loginTimeout", String.valueOf(timeoutSeconds));
+        props.setProperty("connectTimeout", String.valueOf(timeoutSeconds));
+        props.putAll(dialect.connectionProperties(config));
+        if (!config.noAuth) {
+            if (!config.user.isBlank()) {
+                props.setProperty("user", config.user);
+            }
+            if (password != null && !password.isBlank()) {
+                props.setProperty("password", password);
+            }
+        }
+        config.driverProperties.forEach((key, value) -> {
+            if (!key.isBlank()) {
+                props.setProperty(key.trim(), value);
+            }
+        });
+        Connection connection = DriverManager.getConnection(dialect.jdbcUrl(config), props);
+        try {
+            if (config.readOnly) {
+                connection.setReadOnly(true);
+            }
+            String timeZone = config.timeZone.isBlank() ? null : dialect.timeZoneStatement(config.timeZone.trim());
+            try (Statement st = connection.createStatement()) {
+                if (timeZone != null) {
+                    st.execute(timeZone);
+                }
+                for (String sql : dev.phucngu.intelladb.util.SqlSplitter.split(config.startupScript)) {
+                    try {
+                        st.execute(sql);
+                    } catch (SQLException e) {
+                        throw new SQLException("Startup script failed at \"" + sql.strip() + "\": " + e.getMessage(), e);
+                    }
+                }
+            }
+            return connection;
+        } catch (SQLException e) {
+            connection.close();
+            throw e;
+        }
+    }
+
+    /** Milliseconds since the last statement or introspection. */
+    public long idleMillis() {
+        return System.currentTimeMillis() - lastActivity;
+    }
+
+    public long millisSincePing() {
+        return System.currentTimeMillis() - Math.max(lastPing, lastActivity);
+    }
+
+    public boolean isBusy() {
+        return running != null;
+    }
+
+    /** Keep-alive round trip; not user activity, so it doesn't hold off auto-disconnect. */
+    public synchronized void ping() {
+        lastPing = System.currentTimeMillis();
+        if (!isOpen()) {
+            return;
+        }
+        try (Statement st = connection.createStatement()) {
+            st.execute("SELECT 1");
+        } catch (SQLException ignored) {
+            // A dead connection shows up on the next real statement, which reconnects.
+        }
+    }
+
+    /**
      * Executes a single statement and materializes the outcome.
      * Must not be called on the EDT.
      */
     public synchronized @NotNull SqlResult execute(@NotNull String sql) {
         long start = System.currentTimeMillis();
+        lastActivity = start;
         try {
             ensureOpen();
             try (Statement st = connection.createStatement()) {
@@ -116,6 +187,7 @@ public final class DbSession implements AutoCloseable {
                     System.currentTimeMillis() - start);
         } finally {
             running = null;
+            lastActivity = System.currentTimeMillis();
         }
     }
 
@@ -242,7 +314,8 @@ public final class DbSession implements AutoCloseable {
     /** Reloads the schema catalog in the background of the caller's thread. */
     public synchronized @NotNull SchemaCatalog loadCatalog() throws SQLException {
         ensureOpen();
-        SchemaCatalog fresh = MetadataLoader.load(connection, dialect);
+        lastActivity = System.currentTimeMillis();
+        SchemaCatalog fresh = MetadataLoader.load(connection, dialect, config.schemas, config.showSystemSchemas);
         catalog = fresh;
         return fresh;
     }

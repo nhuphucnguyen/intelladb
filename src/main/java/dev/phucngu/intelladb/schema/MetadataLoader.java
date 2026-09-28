@@ -23,10 +23,18 @@ public final class MetadataLoader {
 
     public static @NotNull SchemaCatalog load(@NotNull Connection connection, @NotNull DbDialect dialect)
             throws SQLException {
+        return load(connection, dialect, List.of(), false);
+    }
+
+    /**
+     * @param onlySchemas the schemas to introspect; empty means every schema (system schemas
+     *                    only with {@code showSystem})
+     */
+    public static @NotNull SchemaCatalog load(@NotNull Connection connection, @NotNull DbDialect dialect,
+                                              @NotNull List<String> onlySchemas, boolean showSystem)
+            throws SQLException {
         DatabaseMetaData meta = connection.getMetaData();
         String catalog = connection.getCatalog();
-
-        PostgresObjects pg = PostgresDialect.ID.equals(dialect.id()) ? PostgresObjects.load(connection) : null;
 
         // schema → (table name → TableMeta under construction)
         Map<String, Map<String, TableBuilder>> builders = new TreeMap<>();
@@ -39,11 +47,17 @@ public final class MetadataLoader {
                     continue;
                 }
                 totalSchemas++;
-                if (!dialect.systemSchemas().contains(schema.toLowerCase())) {
+                boolean included = onlySchemas.isEmpty()
+                        ? showSystem || !dialect.systemSchemas().contains(schema.toLowerCase())
+                        : onlySchemas.contains(schema);
+                if (included) {
                     builders.put(schema, new TreeMap<>());
                 }
             }
         }
+
+        PostgresObjects pg = PostgresDialect.ID.equals(dialect.id())
+                ? PostgresObjects.load(connection, List.copyOf(builders.keySet())) : null;
 
         try (ResultSet rs = meta.getTables(catalog, null, "%", new String[]{
                 "TABLE", "VIEW", "MATERIALIZED VIEW", "FOREIGN TABLE"})) {
@@ -57,8 +71,7 @@ public final class MetadataLoader {
                 }
                 Map<String, TableBuilder> tables = builders.get(schema);
                 if (tables == null) {
-                    tables = new TreeMap<>();
-                    builders.put(schema, tables);
+                    continue; // a schema that is filtered out
                 }
                 tables.put(name, new TableBuilder(name, kindOf(type), remarks == null ? "" : remarks));
             }
@@ -131,6 +144,18 @@ public final class MetadataLoader {
         List<String> databases = pg != null ? pg.databases : database.isEmpty() ? List.of() : List.of(database);
         return new SchemaCatalog(schemas, database, databases, totalSchemas,
                 pg == null ? List.of() : pg.extensions, pg == null ? List.of() : pg.roles);
+    }
+
+    /** Every schema of the connected database, system schemas included (for the connection dialog). */
+    public static @NotNull List<String> schemaNames(@NotNull Connection connection) throws SQLException {
+        List<String> names = new ArrayList<>();
+        try (ResultSet rs = connection.getMetaData().getSchemas()) {
+            while (rs.next()) {
+                names.add(rs.getString("TABLE_SCHEM"));
+            }
+        }
+        names.sort(null);
+        return names;
     }
 
     private static TableMeta.@NotNull Kind kindOf(@NotNull String jdbcType) {
