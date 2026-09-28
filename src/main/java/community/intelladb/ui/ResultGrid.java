@@ -9,7 +9,6 @@ import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.JBUI;
-import com.intellij.icons.AllIcons;
 import community.intelladb.IntellaDbIcons;
 import community.intelladb.util.JsonText;
 import community.intelladb.connection.SqlResult;
@@ -24,6 +23,7 @@ import javax.swing.table.AbstractTableModel;
 import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableColumn;
 import javax.swing.table.TableRowSorter;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Font;
 import java.awt.FontMetrics;
@@ -51,6 +51,7 @@ final class ResultGrid extends JBTable {
             "numeric", "decimal", "float4", "float8", "real", "double precision", "money", "oid");
 
     private static final int CELL_PADDING = 6;
+    private static final int BADGE_MARGIN = 3;
     /** JSON cells longer than this are not parsed for the icon (they can still be opened). */
     private static final int MAX_JSON_SNIFF = 1_000_000;
 
@@ -182,14 +183,21 @@ final class ResultGrid extends JBTable {
     }
 
     /**
-     * The "open in viewer" affordance of a JSON cell: a neutral expand icon at the cell's
-     * right edge — not a {} glyph, which read as part of the value right before its own "{".
+     * The "open in viewer" affordance of a JSON cell: a small "JSON" badge overlaid on the
+     * cell's right edge — plain text reads better than the tiny expand icon did.
      */
-    private static @Nullable javax.swing.Icon jsonIcon(@NotNull JsonKind kind, boolean hovered) {
-        if (kind == JsonKind.NONE) {
-            return null;
-        }
-        return hovered ? AllIcons.General.ExpandComponentHover : AllIcons.General.ExpandComponent;
+    private static final String JSON_BADGE = "JSON";
+    private static final JBColor BADGE_BACKGROUND = new JBColor(new Color(0xDFE8F8), new Color(0x2E3F5E));
+    private static final JBColor BADGE_HOVER_BACKGROUND = new JBColor(new Color(0xC2D4F2), new Color(0x3C5480));
+    private static final JBColor BADGE_FOREGROUND = new JBColor(new Color(0x2A5DB0), new Color(0xA9C6F5));
+
+    private static @NotNull Font badgeFont(@NotNull Font cellFont) {
+        return cellFont.deriveFont(Font.BOLD, cellFont.getSize2D() * 0.8f);
+    }
+
+    /** Badge width (text plus horizontal insets) for the given cell font. */
+    private int badgeWidth(@NotNull Font cellFont) {
+        return getFontMetrics(badgeFont(cellFont)).stringWidth(JSON_BADGE) + JBUI.scale(8);
     }
 
     private int hoveredRow = -1;
@@ -211,20 +219,19 @@ final class ResultGrid extends JBTable {
         }
     }
 
-    /** Is the point on the expand icon of a JSON cell? A click there opens the JSON viewer. */
+    /** Is the point on the "JSON" badge of a JSON cell? A click there opens the JSON viewer. */
     private boolean onJsonIcon(@NotNull java.awt.Point point) {
         int row = rowAtPoint(point);
         int column = columnAtPoint(point);
         if (row < 0 || column < 0) {
             return false;
         }
-        javax.swing.Icon icon = jsonIcon(jsonKind(row, column), false);
-        if (icon == null) {
+        if (getValueAt(row, column) == null || jsonKind(row, column) == JsonKind.NONE) {
             return false;
         }
         java.awt.Rectangle cell = getCellRect(row, column, false);
-        int iconStart = cell.x + cell.width - JBUI.scale(CELL_PADDING) - icon.getIconWidth();
-        return point.x >= iconStart - JBUI.scale(3);
+        int badgeStart = cell.x + cell.width - JBUI.scale(BADGE_MARGIN) - badgeWidth(getFont());
+        return point.x >= badgeStart - JBUI.scale(2);
     }
 
     @Override
@@ -265,21 +272,19 @@ final class ResultGrid extends JBTable {
     }
 
     private final class CellRenderer extends ColoredTableCellRenderer {
-        /** Painted at the right edge (see {@link #paintComponent}); null for non-JSON cells. */
-        private @Nullable javax.swing.Icon trailingIcon;
+        /** Overlay the "JSON" badge (see {@link #paintComponent}); false for non-JSON cells. */
+        private boolean jsonBadge;
+        private boolean badgeHovered;
 
         @Override
         protected void customizeCellRenderer(@NotNull JTable table, @Nullable Object value, boolean selected,
                                              boolean hasFocus, int row, int column) {
             setFont(table.getFont());
+            setBorder(JBUI.Borders.empty(0, CELL_PADDING));
             boolean numeric = isNumericColumn(table.convertColumnIndexToModel(column));
             setTextAlign(numeric ? SwingConstants.RIGHT : SwingConstants.LEFT);
-            trailingIcon = value == null ? null
-                    : jsonIcon(jsonKind(row, column), row == hoveredRow && column == hoveredColumn);
-            // Reserve the icon's strip on the right so the text never runs under it.
-            int right = CELL_PADDING + (trailingIcon == null ? 0
-                    : JBUI.unscale(trailingIcon.getIconWidth()) + 4);
-            setBorder(JBUI.Borders.empty(0, CELL_PADDING, 0, right));
+            jsonBadge = value != null && jsonKind(row, column) != JsonKind.NONE;
+            badgeHovered = row == hoveredRow && column == hoveredColumn;
             if (value == null) {
                 append("<null>", SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES);
             } else {
@@ -290,11 +295,32 @@ final class ResultGrid extends JBTable {
         @Override
         protected void paintComponent(java.awt.Graphics g) {
             super.paintComponent(g);
-            javax.swing.Icon icon = trailingIcon;
-            if (icon != null) {
-                int x = getWidth() - JBUI.scale(CELL_PADDING) - icon.getIconWidth();
-                int y = (getHeight() - icon.getIconHeight()) / 2;
-                icon.paintIcon(this, g, x, y);
+            if (!jsonBadge) {
+                return;
+            }
+            java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
+            try {
+                g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+                com.intellij.ide.ui.UISettings.setupAntialiasing(g2);
+                Font font = badgeFont(getFont());
+                java.awt.FontMetrics metrics = g2.getFontMetrics(font);
+                int width = badgeWidth(getFont());
+                int height = Math.min(getHeight() - JBUI.scale(4), metrics.getHeight() + JBUI.scale(2));
+                int x = getWidth() - JBUI.scale(BADGE_MARGIN) - width;
+                int y = (getHeight() - height) / 2;
+                // Blank out the text under (and just before) the badge so it overlays cleanly.
+                g2.setColor(getBackground());
+                g2.fillRect(x - JBUI.scale(4), 0, getWidth() - x + JBUI.scale(4), getHeight());
+                g2.setColor(badgeHovered ? BADGE_HOVER_BACKGROUND : BADGE_BACKGROUND);
+                int arc = JBUI.scale(6);
+                g2.fillRoundRect(x, y, width, height, arc, arc);
+                g2.setColor(BADGE_FOREGROUND);
+                g2.setFont(font);
+                int textX = x + (width - metrics.stringWidth(JSON_BADGE)) / 2;
+                int textY = y + (height - metrics.getHeight()) / 2 + metrics.getAscent();
+                g2.drawString(JSON_BADGE, textX, textY);
+            } finally {
+                g2.dispose();
             }
         }
     }
