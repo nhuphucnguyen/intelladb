@@ -15,7 +15,8 @@ import javax.swing.Icon;
 /**
  * How console files look and behave in the editor: tab title {@code console [@name]},
  * a console icon, and the console header toolbar installed whenever a console tab opens
- * (including reopen after close).
+ * (including reopen after close). Also records which console tabs are open, so they
+ * come back after a restart (see {@link ConsoleRestoreStartup}).
  */
 public final class ConsoleFilePresentation implements EditorTabTitleProvider, FileIconProvider,
         FileEditorManagerListener {
@@ -38,6 +39,15 @@ public final class ConsoleFilePresentation implements EditorTabTitleProvider, Fi
             for (var editor : source.getEditors(file)) {
                 console.installHeader(editor);
             }
+            ConsoleStore.getInstance(source.getProject()).setOpen(console.config().id, true);
+        }
+    }
+
+    @Override
+    public void fileClosed(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
+        SqlConsole console = file.getUserData(SqlConsole.KEY);
+        if (console != null) {
+            ConsoleStore.getInstance(source.getProject()).setOpen(console.config().id, false);
         }
     }
 }

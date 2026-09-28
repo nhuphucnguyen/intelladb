@@ -22,8 +22,10 @@ import java.util.function.IntSupplier;
 /**
  * Recently executed console queries with their results, newest first, so earlier results
  * can be reopened and compared without running the query again. Keeps the last N entries
- * (application setting, see {@link #limit()}), in memory for the IDE session; each entry
- * holds the fetched rows (at most {@link SqlResult#MAX_ROWS}). Accessed on the EDT.
+ * (application setting, see {@link #limit()}); each entry holds the fetched rows (at most
+ * {@link SqlResult#MAX_ROWS}). Persisted per project in the IDE system directory — not
+ * under the project, so cached result rows never end up in version control — and saved
+ * in the background after every change. Accessed on the EDT.
  */
 @Service(Service.Level.PROJECT)
 public final class QueryHistory {
@@ -47,14 +49,36 @@ public final class QueryHistory {
     private final Deque<Entry> entries = new ArrayDeque<>();
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
     private final IntSupplier limit;
+    private final @Nullable QueryHistoryStore store;
+    /** Saves one at a time, in order; a newer snapshot simply overwrites the file again. */
+    private final java.util.concurrent.ExecutorService saver;
 
     public QueryHistory(@NotNull Project project) {
-        this(QueryHistory::configuredLimit);
+        this(QueryHistory::configuredLimit, new QueryHistoryStore(storeFile(project)));
     }
 
-    /** For tests: a history with a fixed or custom limit source. */
+    /** For tests: a history with a fixed or custom limit source, kept in memory only. */
     public QueryHistory(@NotNull IntSupplier limit) {
+        this(limit, null);
+    }
+
+    /** For tests: as {@link #QueryHistory(IntSupplier)}, persisted through {@code store}. */
+    public QueryHistory(@NotNull IntSupplier limit, @Nullable QueryHistoryStore store) {
         this.limit = limit;
+        this.store = store;
+        this.saver = store == null ? null : com.intellij.util.concurrency.SequentialTaskExecutor
+                .createSequentialApplicationPoolExecutor("IntellaDB query history");
+        if (store != null) {
+            List<Entry> loaded = store.load();
+            entries.addAll(loaded);
+            loaded.forEach(entry -> IDS.accumulateAndGet(entry.id(), Math::max));
+            trim();
+        }
+    }
+
+    private static @NotNull java.nio.file.Path storeFile(@NotNull Project project) {
+        return java.nio.file.Path.of(com.intellij.openapi.application.PathManager.getSystemPath(),
+                "intelladb", "history", project.getLocationHash() + ".json.gz");
     }
 
     public static @NotNull QueryHistory getInstance(@NotNull Project project) {
@@ -108,7 +132,23 @@ public final class QueryHistory {
     }
 
     private void fireChanged() {
+        save();
         listeners.forEach(Runnable::run);
+    }
+
+    private void save() {
+        if (store == null) {
+            return;
+        }
+        List<Entry> snapshot = entries(); // entries are immutable: safe to write off the EDT
+        saver.execute(() -> {
+            try {
+                store.save(snapshot);
+            } catch (java.io.IOException e) {
+                com.intellij.openapi.diagnostic.Logger.getInstance(QueryHistory.class)
+                        .warn("Could not save the query history", e);
+            }
+        });
     }
 
     // ------------------------------------------------------------------ setting

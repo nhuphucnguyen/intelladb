@@ -49,6 +49,9 @@
 
         <!-- INSERT column <-> value aid (caret highlighting + inline column hints) -->
         <postStartupActivity implementation="community.intelladb.sql.SqlColumnValueAidStartup"/>
+
+        <!-- reopens the SQL console tabs that were open at the last close -->
+        <postStartupActivity implementation="community.intelladb.ui.ConsoleRestoreStartup"/>
     </extensions>
 
     <projectListeners>

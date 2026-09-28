@@ -302,6 +302,7 @@ public final class ConnectionTreePanel implements Disposable {
                 "Delete connection '" + config.name + "'?", "Intella DB", Messages.getQuestionIcon());
         if (answer == Messages.YES) {
             manager.deleteConfig(config.id);
+            ConsoleStore.getInstance(project).remove(config.id);
             explorer.refreshTree();
         }
     }

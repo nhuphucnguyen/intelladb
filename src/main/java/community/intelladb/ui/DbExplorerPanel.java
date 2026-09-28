@@ -179,6 +179,21 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
 
     /** As {@link #openConsole(DbConfig, String)}; a non-null {@code schema} becomes the console's default schema. */
     public @NotNull SqlConsole openConsole(@NotNull DbConfig config, @Nullable String sql, @Nullable String schema) {
+        return openConsole(config, sql, schema, true);
+    }
+
+    /** Reopens (without focus) the console tabs that were open when the IDE last closed. */
+    public void restoreConsoles() {
+        for (String id : ConsoleStore.getInstance(project).openConsoles()) {
+            DbConfig config = manager.findConfig(id);
+            if (config != null) {
+                openConsole(config, null, null, false);
+            }
+        }
+    }
+
+    private @NotNull SqlConsole openConsole(@NotNull DbConfig config, @Nullable String sql, @Nullable String schema,
+                                            boolean focus) {
         SqlConsole console = consoles.computeIfAbsent(config.id, id -> {
             SqlConsole created = new SqlConsole(project, this, config);
             Disposer.register(this, created);
@@ -191,7 +206,7 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
             console.setSchema(schema);
         }
         var editors = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
-                .openFile(console.file(), true);
+                .openFile(console.file(), focus);
         for (var editor : editors) {
             console.installHeader(editor); // idempotent; the file listener covers later reopens
         }

@@ -106,6 +106,25 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         this.document = FileDocumentManager.getInstance().getDocument(file);
         document.putUserData(SqlColumnValueAid.CONSOLE_DOCUMENT, true);
         this.markers = new ExecutionMarkers(project, document);
+        restore();
+    }
+
+    /** Picks up the text and schema the console had before the IDE restarted; keeps them saved. */
+    private void restore() {
+        ConsoleStore store = ConsoleStore.getInstance(project);
+        ConsoleStore.ConsoleState saved = store.find(config.id);
+        if (saved != null) {
+            if (!saved.sql.isEmpty()) {
+                WriteCommandAction.runWriteCommandAction(project, () -> document.setText(saved.sql));
+            }
+            schema = saved.schema;
+        }
+        document.addDocumentListener(new com.intellij.openapi.editor.event.DocumentListener() {
+            @Override
+            public void documentChanged(@NotNull com.intellij.openapi.editor.event.DocumentEvent event) {
+                store.setSql(config.id, document.getText());
+            }
+        }, this);
     }
 
     public @NotNull DbConfig config() {
@@ -134,6 +153,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
     /** Makes {@code name} the console's default schema, as picking it in the schema switcher does. */
     public void setSchema(@NotNull String name) {
         schema = name;
+        ConsoleStore.getInstance(project).setSchema(config.id, name);
     }
 
     // ------------------------------------------------------------------ editor header
@@ -557,7 +577,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
                 group.add(new DumbAwareAction(name, null, IntellaDbIcons.SCHEMA) {
                     @Override
                     public void actionPerformed(@NotNull AnActionEvent e) {
-                        schema = name;
+                        setSchema(name);
                     }
                 });
             }
