@@ -13,10 +13,12 @@ Built milestone by milestone, same discipline as the sibling
 | M6 | AI layer: `AiPreset` registry, provider-agnostic `OpenAiCompatibleClient` (JDK HttpClient + Gson), `AiSettings` + PasswordSafe key storage, Settings page with Test Provider | ✅ |
 | M7 | AI chat panel: system prompt with live schema DDL (`DdlGenerator`), NL→SQL with fenced-block extraction, Run SQL / Insert into Console / Copy SQL actions, per-connection history, cancellable requests | ✅ |
 | M8 | Visual verification in `runIde` sandbox via computer use (all flows above), bug-fix round: modal-dialog modality, plugin-bundled JDBC driver loading, preset combo labels, connected-state label, AI panel connection fallback | ✅ |
-| M9 | MySQL / SQLite / H2 dialects (interface is ready) | planned |
-| M10 | Data editing in the grid (inline edit, INSERT/UPDATE generation), CSV export | planned |
-| M11 | AI: streaming responses, "explain this error", index advice, per-table context menus | planned |
-| M12 | Query history, bookmarks, schema compare | planned |
+| M9 | Reasoning-model handling (GLM): empty-answer detection pointing at Max tokens, ping budget 512, default max tokens 2048 — verified against the live Z.ai coding plan | ✅ |
+| M9b | Liquibase: SQL injection into XML `<sql>` blocks + INSERT column↔value caret aid with inline column hints (7 new unit tests) — verified in sandbox | ✅ |
+| M10 | MySQL / SQLite / H2 dialects (interface is ready) | planned |
+| M11 | Data editing in the grid (inline edit, INSERT/UPDATE generation), CSV export | planned |
+| M12 | AI: streaming responses, "explain this error", index advice, per-table context menus | planned |
+| M13 | Query history, bookmarks, schema compare | planned |
 
 ## Verification record (M8)
 

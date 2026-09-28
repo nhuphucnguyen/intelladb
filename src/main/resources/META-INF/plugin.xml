@@ -26,5 +26,17 @@
                                  instance="community.intelladb.settings.AiProviderConfigurable"/>
 
         <notificationGroup id="IntellaDB" displayType="BALLOON"/>
+
+        <!-- Liquibase: SQL highlighting inside <sql> elements of XML changelogs -->
+        <languageInjector implementation="community.intelladb.liquibase.LiquibaseSqlInjector"/>
+
+        <!-- IntellaSQL fallback language (highlighting for injected SQL when no platform SQL language) -->
+        <lang.syntaxHighlighterFactory language="IntellaSQL"
+                                       implementationClass="community.intelladb.sql.IntellaSqlSyntaxHighlighter$Factory"/>
+        <lang.parserDefinition language="IntellaSQL"
+                               implementationClass="community.intelladb.sql.IntellaSqlParserDefinition"/>
+
+        <!-- INSERT column <-> value aid (caret highlighting + inline column hints) -->
+        <postStartupActivity implementation="community.intelladb.sql.SqlColumnValueAidStartup"/>
     </extensions>
 </idea-plugin>

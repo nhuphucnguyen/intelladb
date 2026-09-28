@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.26.xsd">
+
+    <changeSet id="1" author="demo">
+        <sql>
+            INSERT INTO public.order_items
+                (order_id, product_id, quantity, unit_price, gift_note)
+            VALUES
+                (1, 7, 2, 279.00, 'wrap in silver paper; ribbon, too'),
+                (2, 1, 1, 129.99, 'leave at front desk, please'),
+                (3, 2, 5, 39.99, NULL);
+
+            UPDATE public.orders
+               SET status = 'processing'
+             WHERE status = 'new';
+        </sql>
+    </changeSet>
+
+    <changeSet id="2" author="demo">
+        <comment>plain column-tag changeset (no raw SQL)</comment>
+        <insert tableName="customers">
+            <column name="name" value="Grace Hopper"/>
+            <column name="email" value="grace@example.com"/>
+            <column name="city" value="Arlington"/>
+        </insert>
+    </changeSet>
+</databaseChangeLog>

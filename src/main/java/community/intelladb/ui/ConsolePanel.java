@@ -14,7 +14,6 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.FileTypeManager;
-import com.intellij.openapi.fileTypes.PlainTextFileType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.ui.EditorTextField;
@@ -23,6 +22,7 @@ import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.table.TableView;
 import com.intellij.util.ui.JBUI;
 import community.intelladb.connection.DbConfig;
+import community.intelladb.sql.SqlColumnValueAid;
 import community.intelladb.connection.DbSession;
 import community.intelladb.connection.SqlResult;
 import community.intelladb.util.SqlSplitter;
@@ -55,9 +55,12 @@ public final class ConsolePanel extends JPanel {
         this.config = config;
 
         Document document = EditorFactory.getInstance().createDocument("-- SQL for " + config.describe() + "\n");
+        document.putUserData(SqlColumnValueAid.CONSOLE_DOCUMENT, true);
         editor = new EditorTextField(document, project, sqlFileType(), false, false);
         editor.setOneLineMode(false);
         editor.setPreferredSize(JBUI.size(600, 180));
+        editor.addSettingsProvider(ed ->
+                ed.getDocument().putUserData(SqlColumnValueAid.CONSOLE_DOCUMENT, true));
 
         JPanel editorPane = new JPanel(new BorderLayout());
         editorPane.add(toolbar(), BorderLayout.NORTH);
@@ -96,7 +99,7 @@ public final class ConsolePanel extends JPanel {
 
     private static @NotNull FileType sqlFileType() {
         FileType sql = FileTypeManager.getInstance().findFileTypeByName("SQL");
-        return sql != null ? sql : PlainTextFileType.INSTANCE;
+        return sql != null ? sql : community.intelladb.sql.IntellaSqlFileType.INSTANCE;
     }
 
     private javax.swing.JComponent toolbar() {
