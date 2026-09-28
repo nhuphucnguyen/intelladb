@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+Released 2026-09-28. Includes everything below (M10-M18): the IntelliJ-style layout
+(consoles and data grids as editor tabs, schema selector in the console toolbar), the
+AI chat as a DB Explorer tab, readable SQL colors in dark themes, the JSON cell viewer,
+closable/bordered tabs, and the one-time password prompt.
+
 ## 0.2.0
 
 ### Changed
