@@ -34,6 +34,7 @@ import community.intelladb.ai.AiCredentials;
 import community.intelladb.ai.AiException;
 import community.intelladb.ai.AiPreset;
 import community.intelladb.ai.AiSettings;
+import community.intelladb.ai.ChatHistory;
 import community.intelladb.ai.ChatMessage;
 import community.intelladb.ai.MarkdownToHtml;
 import community.intelladb.ai.OpenAiCompatibleClient;
@@ -101,6 +102,9 @@ public final class AiChatPanel extends JPanel implements Disposable {
     private volatile List<AiPreset> usableProviders = List.of();
     /** Bumped by New Chat; answers from an older generation are discarded. */
     private int chatGeneration;
+    private final ChatHistory chats;
+    /** The conversation the transcript shows; new turns are saved into it. */
+    private ChatHistory.Conversation conversation;
 
     @Nullable
     private CompletableFuture<?> pending;
@@ -110,6 +114,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
     public AiChatPanel(@NotNull Project project) {
         this.project = project;
         this.opener = SessionOpener.getInstance(project);
+        this.chats = ChatHistory.getInstance(project);
 
         setLayout(new BorderLayout());
 
@@ -124,6 +129,13 @@ public final class AiChatPanel extends JPanel implements Disposable {
 
         refreshConnections();
         refreshProviders();
+        // Pick up where the last session left off.
+        List<ChatHistory.Conversation> saved = chats.conversations();
+        if (saved.isEmpty()) {
+            conversation = chats.start();
+        } else {
+            openConversation(saved.get(0));
+        }
         AiSettings.getInstance().addChangeListener(this::refreshProviders, listenerScope);
         // Keep the switcher in sync when connections are added/edited/deleted in DB Explorer.
         community.intelladb.connection.ConnectionManager.getInstance(project).addListener(() -> {
@@ -164,11 +176,17 @@ public final class AiChatPanel extends JPanel implements Disposable {
         DefaultActionGroup group = new DefaultActionGroup();
         group.add(new ModelPickerAction());
         group.addSeparator();
-        group.add(new DumbAwareAction("New Chat", "Clear the conversation and start over",
+        group.add(new DumbAwareAction("New Chat", "Start a new conversation (this one stays in Chat History)",
                 AllIcons.General.Add) {
             @Override
             public void actionPerformed(@NotNull AnActionEvent e) {
                 newChat();
+            }
+        });
+        group.add(new DumbAwareAction("Chat History", "Reopen an earlier conversation", AllIcons.Vcs.History) {
+            @Override
+            public void actionPerformed(@NotNull AnActionEvent e) {
+                showChatHistory(e);
             }
         });
         group.add(new DumbAwareAction("AI Provider Settings", "Configure the AI provider (provider, key, model)",
@@ -192,8 +210,87 @@ public final class AiChatPanel extends JPanel implements Disposable {
         return bar;
     }
 
-    /** Clears the transcript and every per-connection history, cancelling any request in flight. */
+    /** Starts a new, empty conversation; the current one stays in the chat history. */
     private void newChat() {
+        resetTranscript();
+        conversation = chats.start();
+        input.requestFocusInWindow();
+    }
+
+    /** Shows a saved conversation and continues it: its turns become the model's context again. */
+    private void openConversation(@NotNull ChatHistory.Conversation saved) {
+        resetTranscript();
+        conversation = saved;
+        for (ChatHistory.Turn turn : saved.turns()) {
+            DbConfig config = opener.configs().stream()
+                    .filter(c -> c.id.equals(turn.connectionId())).findFirst().orElse(null);
+            addRow(bubble(null, userBody(turn.question()), true), true);
+            addRow(assistantAnswerRow(turn.answer(), AiAssistant.firstSqlBlock(turn.answer()), config,
+                    turn.question(), turn.model()), false);
+            List<ChatMessage> history = historyByConfig.computeIfAbsent(turn.connectionId(), k -> new ArrayList<>());
+            history.add(ChatMessage.user(turn.question()));
+            history.add(ChatMessage.assistant(turn.answer()));
+        }
+        historyByConfig.replaceAll((id, history) -> new ArrayList<>(AiAssistant.compact(history,
+                AiAssistant.MAX_HISTORY_MESSAGES, AiAssistant.MAX_HISTORY_CHARS)));
+    }
+
+    /** Toolbar "Chat History": saved conversations, most recent first; picking one reopens it. */
+    private void showChatHistory(@NotNull AnActionEvent event) {
+        DefaultActionGroup group = new DefaultActionGroup();
+        java.time.format.DateTimeFormatter format = java.time.format.DateTimeFormatter.ofPattern("d MMM HH:mm");
+        List<ChatHistory.Conversation> saved = chats.conversations();
+        if (saved.isEmpty()) {
+            DumbAwareAction none = new DumbAwareAction("No saved conversations yet") {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e) {
+                }
+
+                @Override
+                public void update(@NotNull AnActionEvent e) {
+                    e.getPresentation().setEnabled(false);
+                }
+            };
+            group.add(none);
+        }
+        for (ChatHistory.Conversation item : saved) {
+            String title = com.intellij.openapi.util.text.StringUtil.shortenTextWithEllipsis(item.title(), 60, 0);
+            group.add(new DumbAwareAction(title + "  ·  " + item.updatedAt().format(format),
+                    item.title(), item == conversation ? AllIcons.Actions.Checked : null) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e) {
+                    openConversation(item);
+                }
+            });
+        }
+        if (!saved.isEmpty()) {
+            group.addSeparator();
+            group.add(new DumbAwareAction("Clear Chat History…", "Delete every saved conversation",
+                    AllIcons.Actions.GC) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e) {
+                    if (com.intellij.openapi.ui.Messages.showYesNoDialog(project,
+                            "Delete all " + saved.size() + " saved conversations?", "Intella DB",
+                            com.intellij.openapi.ui.Messages.getQuestionIcon())
+                            == com.intellij.openapi.ui.Messages.YES) {
+                        chats.clear();
+                        newChat();
+                    }
+                }
+            });
+        }
+        var popup = com.intellij.openapi.ui.popup.JBPopupFactory.getInstance().createActionGroupPopup(
+                "Chat History", group, event.getDataContext(),
+                com.intellij.openapi.ui.popup.JBPopupFactory.ActionSelectionAid.SPEEDSEARCH, true);
+        if (event.getInputEvent() != null && event.getInputEvent().getComponent() != null) {
+            popup.showUnderneathOf(event.getInputEvent().getComponent());
+        } else {
+            popup.showInBestPositionFor(event.getDataContext());
+        }
+    }
+
+    /** Clears the transcript and every per-connection history, cancelling any request in flight. */
+    private void resetTranscript() {
         if (pending != null) {
             pending.cancel(true);
             pending = null;
@@ -205,7 +302,6 @@ public final class AiChatPanel extends JPanel implements Disposable {
         sendButton.setEnabled(true);
         transcript.revalidate();
         transcript.repaint();
-        input.requestFocusInWindow();
     }
 
     /** Reloads saved connections into the switcher, keeping the current selection when possible. */
@@ -390,6 +486,8 @@ public final class AiChatPanel extends JPanel implements Disposable {
         int maxTokens = settings.maxTokens();
         ReasoningEffort reasoningEffort = settings.reasoningEffort();
         boolean localProvider = !settings.preset().needsApiKey();
+        String modelLabel = settingsLabel();
+        ChatHistory.Conversation target = conversation;
 
         CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
             // PasswordSafe reads must stay off the EDT, and local providers must not
@@ -426,8 +524,10 @@ public final class AiChatPanel extends JPanel implements Disposable {
                 appendMessage(bubble(null, errorBody(message), false), false);
             } else {
                 String sql = AiAssistant.firstSqlBlock(answer);
-                JPanel answerRow = assistantAnswerRow(answer, sql, current, question);
+                JPanel answerRow = assistantAnswerRow(answer, sql, current, question, modelLabel);
                 appendMessage(answerRow, false);
+                chats.addTurn(target, new ChatHistory.Turn(current.id, current.name, question, answer,
+                        modelLabel, java.time.LocalDateTime.now()));
                 history.add(ChatMessage.user(question));
                 history.add(ChatMessage.assistant(answer));
                 List<ChatMessage> compacted = AiAssistant.compact(history,
@@ -469,12 +569,17 @@ public final class AiChatPanel extends JPanel implements Disposable {
         }
     }
 
-    private @NotNull JPanel assistantAnswerRow(@NotNull String answer, @Nullable String sql, @NotNull DbConfig forConfig,
-                                              @NotNull String question) {
+    /**
+     * An answer: prose plus, when it has SQL, the SQL with Run / Insert into Console / Copy.
+     * {@code forConfig} is null for a reopened answer whose connection was since deleted —
+     * then it is shown as plain markdown.
+     */
+    private @NotNull JPanel assistantAnswerRow(@NotNull String answer, @Nullable String sql, @Nullable DbConfig forConfig,
+                                              @NotNull String question, @NotNull String modelLabel) {
         JPanel stack = new JPanel();
         stack.setLayout(new javax.swing.BoxLayout(stack, javax.swing.BoxLayout.Y_AXIS));
         stack.setOpaque(false);
-        if (sql == null || sql.isBlank()) {
+        if (sql == null || sql.isBlank() || forConfig == null) {
             stack.add(markdownBody(answer));
         } else {
             int fence = answer.indexOf("```");
@@ -501,7 +606,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
                 stack.add(markdownBody(after));
             }
         }
-        return bubble(settingsLabel(), stack, false);
+        return bubble(modelLabel, stack, false);
     }
 
     /** Renders an answer (or its prose parts) as markdown: paragraphs, lists, code fences. */
