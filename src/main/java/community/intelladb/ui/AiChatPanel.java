@@ -680,6 +680,9 @@ public final class AiChatPanel extends JPanel implements Disposable {
                 SqlResult result = session.execute(sql);
                 ApplicationManager.getApplication().invokeLater(() -> {
                     results.showResult(result);
+                    // The grid's scroll panes exist once the result is shown.
+                    com.intellij.util.ui.UIUtil.uiTraverser(results).filter(JScrollPane.class)
+                            .forEach(this::forwardWheelToTranscript);
                     if (generation == chatGeneration) { // still the same conversation
                         // Shared with the model along with the next question on this connection.
                         pendingResults.computeIfAbsent(forConfig.id, k -> new ArrayList<>())
@@ -878,8 +881,46 @@ public final class AiChatPanel extends JPanel implements Disposable {
         // GridBag compresses rows down to their minimum when the transcript slightly
         // overflows the viewport — code blocks must not be compressible to one line.
         scroller.setMinimumSize(size);
+        forwardWheelToTranscript(scroller);
         return scroller;
     }
+
+    /**
+     * Swing delivers wheel events to the innermost scroll pane only, so a code block or
+     * result grid under the pointer would stop the conversation from scrolling. The
+     * nested pane keeps the wheel while it can scroll that way itself (Shift = sideways);
+     * otherwise the event goes on to the transcript. Idempotent.
+     */
+    private void forwardWheelToTranscript(@NotNull JScrollPane nested) {
+        if (nested == scrollPane || nested.getClientProperty(WHEEL_FORWARDED) != null) {
+            return;
+        }
+        nested.putClientProperty(WHEEL_FORWARDED, true);
+        java.awt.event.MouseWheelListener[] own = nested.getMouseWheelListeners();
+        for (var listener : own) {
+            nested.removeMouseWheelListener(listener);
+        }
+        nested.addMouseWheelListener(e -> {
+            if (e.isShiftDown() || canScrollVertically(nested, e.getWheelRotation() < 0 || e.getPreciseWheelRotation() < 0)) {
+                for (var listener : own) {
+                    listener.mouseWheelMoved(e);
+                }
+            } else {
+                scrollPane.dispatchEvent(javax.swing.SwingUtilities.convertMouseEvent(nested, e, scrollPane));
+            }
+        });
+    }
+
+    private static boolean canScrollVertically(@NotNull JScrollPane pane, boolean up) {
+        JScrollBar bar = pane.getVerticalScrollBar();
+        if (bar == null || !bar.isVisible()) {
+            return false;
+        }
+        return up ? bar.getValue() > bar.getMinimum()
+                : bar.getValue() + bar.getVisibleAmount() < bar.getMaximum();
+    }
+
+    private static final String WHEEL_FORWARDED = "intelladb.wheelForwarded";
 
     private static @NotNull String settingsLabel() {
         String model = AiSettings.getInstance().model();
