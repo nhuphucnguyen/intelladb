@@ -30,6 +30,7 @@ import community.intelladb.IntellaDbIcons;
 import community.intelladb.connection.DbConfig;
 import community.intelladb.connection.DbSession;
 import community.intelladb.connection.SqlResult;
+import community.intelladb.history.QueryHistory;
 import community.intelladb.schema.IdentifierQuoting;
 import community.intelladb.schema.SchemaCatalog;
 import community.intelladb.sql.IntellaSqlFileType;
@@ -292,6 +293,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
                         markers.mark(statement.start(), statement.end(), result);
                     }
                     view.logResult(result);
+                    QueryHistory.getInstance(project).add(config, targetSchema, statement.text(), result);
                     if (into != null) {
                         into.showResult(result);
                     } else if (result.kind == SqlResult.Kind.ROWS) {
