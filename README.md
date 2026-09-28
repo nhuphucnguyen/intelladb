@@ -28,8 +28,8 @@ IntelliJ Platform SDK — plus an AI layer that no stock edition offers in this 
 ## AI provider setup
 
 1. `Settings → Tools → Intella DB — AI Provider`
-2. Pick a preset (default: **Z.ai GLM — Coding Plan**, `https://api.z.ai/api/coding/paas/v4`,
-   model `glm-4.6`), paste your API key, click **Test Provider**.
+2. Pick a preset (default: **Z.ai GLM — Coding Plan**, `https://api.z.ai/api/coding/paas/v4`;
+   its Model dropdown offers **glm-5.3** and **glm-5.3-flash**), paste your API key, click **Test Provider**.
 3. Open the **DB Explorer** tool window → **AI Assistant** tab → ask away.
 
 Any endpoint that implements `POST {baseUrl}/chat/completions` with

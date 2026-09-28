@@ -33,7 +33,7 @@ public final class AiProviderConfigurable implements Configurable {
     private JComboBox<AiPreset> presetCombo;
     private JBTextField baseUrl;
     private JBPasswordField apiKey;
-    private JBTextField model;
+    private com.intellij.openapi.ui.ComboBox<String> model;
     private JSpinner temperature;
     private JSpinner maxTokens;
     private JBCheckBox includeSchema;
@@ -56,7 +56,8 @@ public final class AiProviderConfigurable implements Configurable {
         });
         baseUrl = new JBTextField();
         apiKey = new JBPasswordField();
-        model = new JBTextField();
+        model = new com.intellij.openapi.ui.ComboBox<>();
+        model.setEditable(true);
         temperature = new JSpinner(new SpinnerNumberModel(Double.valueOf(0.2), Double.valueOf(0), Double.valueOf(2), Double.valueOf(0.1)));
         maxTokens = new JSpinner(new SpinnerNumberModel(1024, 64, 32768, 64));
         includeSchema = new JBCheckBox("Include database schema in the AI prompt (recommended)", true);
@@ -67,9 +68,7 @@ public final class AiProviderConfigurable implements Configurable {
         presetCombo.addItemListener(e -> {
             if (e.getStateChange() == ItemEvent.SELECTED && presetCombo.getSelectedItem() instanceof AiPreset preset) {
                 baseUrl.setText(preset.baseUrl());
-                if (!preset.defaultModel().isBlank()) {
-                    model.setText(preset.defaultModel());
-                }
+                applyModelChoices(preset);
             }
         });
 
@@ -122,7 +121,7 @@ public final class AiProviderConfigurable implements Configurable {
     @Override
     public boolean isModified() {
         return !baseUrl.getText().equals(settings.baseUrl())
-                || !model.getText().equals(settings.model())
+                || !selectedModel().equals(settings.model())
                 || presetCombo.getSelectedIndex() != presetIndexOf(settings.presetId())
                 || !String.valueOf(apiKey.getPassword()).isBlank()
                 || ((Number) temperature.getValue()).doubleValue() != settings.temperature()
@@ -136,7 +135,7 @@ public final class AiProviderConfigurable implements Configurable {
         String key = new String(apiKey.getPassword());
         settings.set(preset != null ? preset.id() : AiPreset.CUSTOM.id(),
                 baseUrl.getText().trim(),
-                model.getText().trim(),
+                selectedModel(),
                 ((Number) temperature.getValue()).doubleValue(),
                 ((Number) maxTokens.getValue()).intValue(),
                 includeSchema.isSelected());
@@ -144,6 +143,9 @@ public final class AiProviderConfigurable implements Configurable {
             AiCredentials.write(key);
             apiKey.setText("");
         }
+        // Flush app-level state immediately so the provider config survives restarts
+        // even when the IDE exits without a regular shutdown.
+        com.intellij.openapi.application.ApplicationManager.getApplication().saveSettings();
     }
 
     @Override
@@ -151,7 +153,8 @@ public final class AiProviderConfigurable implements Configurable {
         AiPreset preset = AiPreset.byId(settings.presetId());
         presetCombo.setSelectedItem(preset != null ? preset : AiPreset.CUSTOM);
         baseUrl.setText(settings.baseUrl());
-        model.setText(settings.model());
+        applyModelChoices(preset != null ? preset : AiPreset.CUSTOM);
+        selectModel(settings.model());
         temperature.setValue(settings.temperature());
         maxTokens.setValue(settings.maxTokens());
         includeSchema.setSelected(settings.includeSchema());
@@ -163,6 +166,32 @@ public final class AiProviderConfigurable implements Configurable {
                     apiKey.getEmptyText().setText(saved
                             ? "A key is saved (leave empty to keep it)" : "Paste your API key"));
         });
+    }
+
+    /** Fills the model dropdown with the preset's suggested ids; free text stays allowed. */
+    private void applyModelChoices(@NotNull AiPreset preset) {
+        model.removeAllItems();
+        for (String id : preset.models()) {
+            model.addItem(id);
+        }
+        selectModel(preset.defaultModel());
+    }
+
+    private void selectModel(@NotNull String id) {
+        if (id.isBlank()) {
+            model.setSelectedItem("");
+            return;
+        }
+        model.setSelectedItem(id);
+        // ensure the editor shows the value even when it is not among the suggestions
+        if (!selectedModel().equals(id)) {
+            model.getEditor().setItem(id);
+        }
+    }
+
+    private @NotNull String selectedModel() {
+        Object item = model.getEditor().getItem();
+        return item == null ? "" : String.valueOf(item).trim();
     }
 
     private static int presetIndexOf(@NotNull String id) {

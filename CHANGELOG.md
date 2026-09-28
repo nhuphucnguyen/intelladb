@@ -14,12 +14,14 @@ Initial release.
   update counts, per-batch timing and server version
 - Table data preview (first 200 rows)
 - AI assistant (provider-agnostic, OpenAI-compatible wire format):
-  - Presets: Z.ai GLM coding plan / standard API, Zhipu BigModel, OpenAI, DeepSeek,
+  - Presets: Z.ai GLM coding plan / standard API (model dropdown: glm-5.3,
+    glm-5.3-flash; free text allowed), Zhipu BigModel, OpenAI, DeepSeek,
     OpenRouter, Ollama, LM Studio, custom base URL
   - API key in the IDE secure credential store; never in project files
   - Chat with live schema DDL context; NL→SQL answers get Run SQL /
     Insert into Console / Copy SQL actions; per-connection history; cancellable
   - Settings page (Tools → Intella DB — AI Provider) with Test Provider ping
-- 23 unit tests, including wire-format tests against an in-process HTTP server
+- AI settings persist via the IDE's PropertiesComponent (options/other.xml), flushed on Apply
+- 32 unit tests, including wire-format tests against an in-process HTTP server
 - `tools/`: sample-data.sql (demo schema) and mock-ai.py (deterministic mock provider
   that logs every request for wire-format inspection)

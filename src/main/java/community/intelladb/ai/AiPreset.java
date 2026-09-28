@@ -3,24 +3,35 @@ package community.intelladb.ai;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.List;
+
 /**
  * A known OpenAI-compatible endpoint. The plugin speaks the OpenAI chat-completions wire
  * format, which covers Z.ai GLM (coding plan and standard API), OpenAI, DeepSeek, OpenRouter,
  * local Ollama, and any other compatible gateway.
+ *
+ * @param models suggested model ids shown in the settings dropdown; any other id can still be typed.
  */
 public record AiPreset(@NotNull String id, @NotNull String label, @NotNull String baseUrl,
-                       @NotNull String defaultModel, boolean needsApiKey) {
+                       @NotNull String defaultModel, @NotNull List<String> models, boolean needsApiKey) {
+
+    public AiPreset(@NotNull String id, @NotNull String label, @NotNull String baseUrl,
+                    @NotNull String defaultModel, boolean needsApiKey) {
+        this(id, label, baseUrl, defaultModel, List.of(defaultModel), needsApiKey);
+    }
 
     public static final AiPreset CUSTOM =
             new AiPreset("custom", "Custom (OpenAI-compatible)", "", "", true);
 
     public static final AiPreset ZAI_CODING_PLAN =
             new AiPreset("zai-coding-plan", "Z.ai GLM — Coding Plan",
-                    "https://api.z.ai/api/coding/paas/v4", "glm-4.6", true);
+                    "https://api.z.ai/api/coding/paas/v4", "glm-5.3",
+                    List.of("glm-5.3", "glm-5.3-flash"), true);
 
     public static final AiPreset ZAI_API =
             new AiPreset("zai-api", "Z.ai GLM — Standard API",
-                    "https://api.z.ai/api/paas/v4", "glm-4.6", true);
+                    "https://api.z.ai/api/paas/v4", "glm-5.3",
+                    List.of("glm-5.3", "glm-5.3-flash"), true);
 
     public static final AiPreset BIGMODEL =
             new AiPreset("bigmodel", "Zhipu BigModel (open.bigmodel.cn)",

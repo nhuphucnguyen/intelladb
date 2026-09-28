@@ -169,28 +169,18 @@ public final class AiChatPanel extends JPanel {
             return;
         }
         setConnection(current);
-        AiSettings settings = AiSettings.getInstance();
-        String key = AiCredentials.read();
-        boolean localProvider = settings.presetId().equals("ollama") || settings.presetId().equals("lmstudio");
-        boolean missingKey = (key == null || key.isBlank()) && !localProvider;
-        if (settings.baseUrl().isBlank() || settings.model().isBlank() || missingKey) {
-            appendMessage(bubble("Intella DB AI",
-                    errorBody("No AI provider is configured (or the API key is missing).<br>"
-                            + "Open Settings → Tools → Intella DB — AI Provider."), false, null));
-            return;
-        }
-
         input.setText("");
         sendButton.setEnabled(false);
         appendMessage(bubble("You", htmlBody(escapeHtml(question)), true, null));
         DbConfig target = current;
         // Connects (with password prompt) when needed, then continues on the EDT.
+        // The provider pre-check runs inside doSend's background path (PasswordSafe
+        // must not be read on the EDT).
         explorer.withSession(target, session -> doSend(target, session, question));
     }
 
     private void doSend(@NotNull DbConfig current, @NotNull DbSession session, @NotNull String question) {
         AiSettings settings = AiSettings.getInstance();
-        String key = AiCredentials.read();
         List<ChatMessage> history = historyByConfig.computeIfAbsent(current.id, k -> new ArrayList<>());
         showThinking();
 
@@ -198,11 +188,24 @@ public final class AiChatPanel extends JPanel {
                 AiAssistant.systemPrompt(session.catalog(), settings.includeSchema()),
                 AiAssistant.trim(history, 10),
                 question);
+        String baseUrl = settings.baseUrl();
+        String model = settings.model();
+        double temperature = settings.temperature();
+        int maxTokens = settings.maxTokens();
+        boolean localProvider = settings.presetId().equals("ollama") || settings.presetId().equals("lmstudio");
 
-        OpenAiCompatibleClient client = new OpenAiCompatibleClient(
-                settings.baseUrl(), key == null ? "" : key, settings.model(),
-                settings.temperature(), settings.maxTokens());
-        CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> client.chat(messages));
+        CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
+            // PasswordSafe read must stay off the EDT.
+            String key = AiCredentials.read();
+            boolean missingKey = (key == null || key.isBlank()) && !localProvider;
+            if (baseUrl.isBlank() || model.isBlank() || missingKey) {
+                throw new AiException("No AI provider is configured (or the API key is missing).\n"
+                        + "Open Settings → Tools → Intella DB — AI Provider.");
+            }
+            OpenAiCompatibleClient client = new OpenAiCompatibleClient(
+                    baseUrl, key == null ? "" : key, model, temperature, maxTokens);
+            return client.chat(messages);
+        });
         pending = future;
         future.whenComplete((answer, error) -> ApplicationManager.getApplication().invokeLater(() -> {
             if (pending == future) {
