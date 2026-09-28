@@ -1,0 +1,30 @@
+<idea-plugin>
+    <id>community.intelladb</id>
+    <name>Intella DB</name>
+    <vendor>community</vendor>
+    <description><![CDATA[
+    A lightweight database client for <b>IntelliJ IDEA Community</b>: manage PostgreSQL connections,
+    browse schemas/tables/columns, preview table data, run SQL in a console with a results grid,
+    and ask an AI assistant about your database in natural language (NL → SQL).
+    <br><br>
+    The AI assistant is provider-agnostic: any OpenAI-compatible endpoint works — Z.ai GLM coding plan,
+    OpenAI, DeepSeek, OpenRouter, or a local Ollama. Your API key is stored in the IDE's secure
+    credential store.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="DB Explorer" anchor="right" canCloseContents="false"
+                    factoryClass="community.intelladb.ui.DbToolWindowFactory"/>
+
+        <applicationService serviceImplementation="community.intelladb.ai.AiSettings"/>
+
+        <applicationConfigurable parentId="tools"
+                                 id="community.intelladb.ai.provider"
+                                 displayName="Intella DB — AI Provider"
+                                 instance="community.intelladb.settings.AiProviderConfigurable"/>
+
+        <notificationGroup id="IntellaDB" displayType="BALLOON"/>
+    </extensions>
+</idea-plugin>
