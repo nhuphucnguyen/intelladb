@@ -1,6 +1,7 @@
 package community.intelladb.ui;
 
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.ui.components.JBCheckBox;
@@ -149,6 +150,7 @@ public final class ConnectionDialog extends DialogWrapper {
         DbDialect dialect = probe.dialect();
         testStatus.setText("Testing…");
         testStatus.setForeground(JBUI.CurrentTheme.Link.linkColor());
+        testButton.setEnabled(false);
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             AtomicBoolean ok = new AtomicBoolean(false);
             String message;
@@ -175,13 +177,14 @@ public final class ConnectionDialog extends DialogWrapper {
             }
             String finalMessage = message;
             boolean success = ok.get();
+            // The dialog is modal: a plain invokeLater would queue until it closes.
             ApplicationManager.getApplication().invokeLater(() -> {
                 testStatus.setText(finalMessage);
                 testStatus.setForeground(success
                         ? JBUI.CurrentTheme.Label.foreground()
                         : JBUI.CurrentTheme.Label.errorForeground());
                 testButton.setEnabled(true);
-            });
+            }, ModalityState.stateForComponent(getContentPane()));
         });
     }
 

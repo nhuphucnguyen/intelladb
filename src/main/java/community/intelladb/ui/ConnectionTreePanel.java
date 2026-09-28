@@ -79,6 +79,7 @@ public final class ConnectionTreePanel implements Disposable {
         tree.setRootVisible(false);
         tree.setShowsRootHandles(true);
         tree.setCellRenderer(new Renderer());
+        tree.getEmptyText().setText("No connections yet — click + to add one");
         tree.addMouseListener(new MouseHandler());
 
         fill();
