@@ -67,11 +67,7 @@ public final class DbSession implements AutoCloseable {
         if (isOpen()) {
             return;
         }
-        try {
-            Class.forName("org.postgresql.Driver");
-        } catch (ClassNotFoundException e) {
-            throw new SQLException("PostgreSQL JDBC driver not found", e);
-        }
+        dialect.loadDriver();
         Properties props = new Properties();
         if (!config.user.isBlank()) {
             props.setProperty("user", config.user);

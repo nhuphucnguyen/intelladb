@@ -40,4 +40,13 @@ public final class PostgresDialect implements DbDialect {
     public @NotNull Set<String> systemSchemas() {
         return Set.of("pg_catalog", "information_schema", "pg_toast");
     }
+
+    @Override
+    public void loadDriver() throws java.sql.SQLException {
+        try {
+            Class.forName("org.postgresql.Driver");
+        } catch (ClassNotFoundException e) {
+            throw new java.sql.SQLException("PostgreSQL JDBC driver not found", e);
+        }
+    }
 }

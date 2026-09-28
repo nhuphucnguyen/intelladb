@@ -154,11 +154,17 @@ public final class AiChatPanel extends JPanel {
         if (question.isEmpty()) {
             return;
         }
-        if (config == null) {
-            appendErrorBubble("Select a connection in the DB Explorer tree first.");
+        // Fall back to the selected connection, then to the first configured one.
+        DbConfig current = config != null ? config : explorer.selectedConfig();
+        if (current == null && !explorer.manager().configs().isEmpty()) {
+            current = explorer.manager().configs().get(0);
+        }
+        if (current == null) {
+            appendErrorBubble("Add a connection in the DB Explorer tree first.");
             refreshMessages();
             return;
         }
+        setConnection(current);
         AiSettings settings = AiSettings.getInstance();
         String key = AiCredentials.read();
         boolean localProvider = settings.presetId().equals("ollama") || settings.presetId().equals("lmstudio");
@@ -170,13 +176,13 @@ public final class AiChatPanel extends JPanel {
             return;
         }
 
-        DbConfig current = config;
         appendUserBubble(question);
         refreshMessages();
         input.setText("");
         sendButton.setEnabled(false);
+        DbConfig target = current;
         // Connects (with password prompt) when needed, then continues on the EDT.
-        explorer.withSession(current, session -> doSend(current, session, question));
+        explorer.withSession(target, session -> doSend(target, session, question));
     }
 
     private void doSend(@NotNull DbConfig current, @NotNull DbSession session, @NotNull String question) {

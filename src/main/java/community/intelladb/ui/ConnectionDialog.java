@@ -149,12 +149,13 @@ public final class ConnectionDialog extends DialogWrapper {
         applyTo(probe, new String(passwordField.getPassword()));
         DbDialect dialect = probe.dialect();
         testStatus.setText("Testing…");
-        testStatus.setForeground(JBUI.CurrentTheme.Link.linkColor());
+        testStatus.setForeground(com.intellij.ui.JBColor.BLUE);
         testButton.setEnabled(false);
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             AtomicBoolean ok = new AtomicBoolean(false);
             String message;
             try {
+                dialect.loadDriver();
                 Properties props = new Properties();
                 props.setProperty("loginTimeout", "5");
                 props.setProperty("connectTimeout", "5");

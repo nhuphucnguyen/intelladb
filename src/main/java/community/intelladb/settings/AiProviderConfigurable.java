@@ -47,6 +47,13 @@ public final class AiProviderConfigurable implements Configurable {
     @Override
     public @Nullable JComponent createComponent() {
         presetCombo = new JComboBox<>(AiPreset.ALL);
+        presetCombo.setRenderer(new com.intellij.ui.SimpleListCellRenderer<>() {
+            @Override
+            public void customize(javax.swing.JList<? extends AiPreset> list, AiPreset value, int index,
+                                  boolean selected, boolean hasFocus) {
+                setText(value != null ? value.label() : "");
+            }
+        });
         baseUrl = new JBTextField();
         apiKey = new JBPasswordField();
         model = new JBTextField();

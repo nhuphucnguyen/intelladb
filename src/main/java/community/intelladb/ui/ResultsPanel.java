@@ -36,7 +36,7 @@ public final class ResultsPanel extends JPanel {
 
     public void showRunning() {
         info.setText("Running…");
-        info.setForeground(JBUI.CurrentTheme.Link.linkColor());
+        info.setForeground(com.intellij.ui.JBColor.BLUE);
     }
 
     public void showMessage(@NotNull String message) {

@@ -449,13 +449,15 @@ public final class ConnectionTreePanel implements Disposable {
             switch (node.getUserObject()) {
                 case ConfigEntry c -> {
                     DbConfig config = c.config();
-                    String state = transientState.get(config.id);
                     boolean connected = manager.session(config.id) != null;
+                    String state = connected ? null : transientState.get(config.id);
                     append(config.name.isEmpty() ? config.describe() : config.name,
                             SimpleTextAttributes.REGULAR_ATTRIBUTES);
                     String suffix = "  —  " + config.describe();
                     if ("connecting".equals(state)) {
                         suffix = "  —  connecting…";
+                    } else if (state != null && state.startsWith("error:")) {
+                        suffix = "  —  failed";
                     } else if (connected) {
                         suffix = "  —  connected";
                     }

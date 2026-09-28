@@ -20,4 +20,10 @@ public interface DbDialect {
 
     /** Schemas that are part of the server itself and hidden from the tree by default. */
     @NotNull java.util.Set<String> systemSchemas();
+
+    /**
+     * Loads the JDBC driver class. DriverManager's service discovery does not see
+     * plugin-bundled drivers, so an explicit load is required before connecting.
+     */
+    void loadDriver() throws java.sql.SQLException;
 }

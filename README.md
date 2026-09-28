@@ -1,0 +1,70 @@
+# Intella DB for IntelliJ IDEA
+
+A free, open-source database client for **IntelliJ IDEA Community** (2026.2+): PostgreSQL
+connections, a schema browser, a SQL console with a results grid, and an AI assistant that
+answers questions about your database in natural language (NL → SQL).
+
+**Status:** working end-to-end, verified visually in the IDE sandbox — see [ROADMAP.md](ROADMAP.md).
+
+## Why
+
+IDEA Community ships without the paid "Database Tools and SQL" experience of the unified IDEA.
+This plugin re-implements the everyday essentials with 100% original code on the public
+IntelliJ Platform SDK — plus an AI layer that no stock edition offers in this form.
+
+## Features
+
+| Area | What you get |
+|------|--------------|
+| Connections | Add/edit/delete PostgreSQL connections, Test Connection dialog, passwords in the IDE PasswordSafe (or session-only), SSL toggle, JDBC URL override |
+| Schema browser | Connection → schema → table/view → column tree with types and primary-key markers, metadata refresh, Copy Table/Schema DDL |
+| SQL console | Multi-line editor with SQL highlighting, Ctrl/Cmd+Enter to run, multi-statement scripts (quote/dollar-quote/comment-aware splitter), results grid (first 1000 rows), update counts, timing, server version |
+| Table data | Double-click any table for a first-200-rows preview grid |
+| AI assistant | Ask about your database in plain English; answers that need data include a ready-to-run SQL block with **Run SQL / Insert into Console / Copy SQL** actions; the live schema DDL is included in the prompt; per-connection chat history |
+| Provider-agnostic AI | Any OpenAI-compatible endpoint: **Z.ai GLM (coding plan or standard API)**, Zhipu BigModel, OpenAI, DeepSeek, OpenRouter, Ollama (local), LM Studio (local), or a custom base URL. API key stored in the IDE secure credential store. |
+
+## AI provider setup
+
+1. `Settings → Tools → Intella DB — AI Provider`
+2. Pick a preset (default: **Z.ai GLM — Coding Plan**, `https://api.z.ai/api/coding/paas/v4`,
+   model `glm-4.6`), paste your API key, click **Test Provider**.
+3. Open the **DB Explorer** tool window → **AI Assistant** tab → ask away.
+
+Any endpoint that implements `POST {baseUrl}/chat/completions` with
+`{"choices":[{"message":{"content":…}}]}` works — the client is ~150 lines of JDK
+`HttpClient` + Gson, no SDK lock-in.
+
+## Building & installing
+
+```bash
+./gradlew buildPlugin     # produces build/distributions/intella-db-<version>.zip
+./gradlew test            # 23 unit tests (incl. AI wire-format tests over a local HTTP server)
+./gradlew runIde          # sandbox IDE with the plugin loaded
+```
+
+Install: `Settings → Plugins → ⚙ → Install Plugin from Disk…` and pick the ZIP.
+
+## Demo / verification setup
+
+```bash
+brew install postgresql@17 && brew services run postgresql@17
+psql -d postgres -f tools/sample-data.sql        # creates user intella/intella123 + intelladb
+python3 tools/mock-ai.py                          # mock OpenAI-compatible provider on :8931
+```
+
+`tools/mock-ai.log` records every AI request the plugin sends (headers + JSON body), which is
+how the wire format was verified.
+
+## Compatibility
+
+- IntelliJ IDEA 2026.2+ (build 262.*, Community or the free mode of the unified IDEA)
+- Java 25 toolchain (the 2026.2 platform itself is built with Java 25), Gradle 9.x,
+  IntelliJ Platform Gradle Plugin 2.x
+- Bundled PostgreSQL JDBC driver 42.7.4 — no driver install needed
+
+## Legal notes
+
+- Original implementation; no code or resources taken from IntelliJ IDEA Ultimate.
+- All IntelliJ Platform usage is via the documented SDK / public extension points.
+- "IntelliJ" and "PostgreSQL" are trademarks of their respective owners. All icons in
+  `src/main/resources/icons/` are original designs drawn for this plugin.
