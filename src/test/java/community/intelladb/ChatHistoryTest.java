@@ -17,7 +17,8 @@ class ChatHistoryTest {
     Path dir;
 
     private static ChatHistory.Turn turn(String question) {
-        return new ChatHistory.Turn("c1", "localhost", question, "Answer to " + question, "glm-5.3",
+        return new ChatHistory.Turn("c1", "localhost", question, "Query result of: " + question,
+                "Answer to " + question, "glm-5.3",
                 LocalDateTime.of(2026, 9, 28, 10, 0));
     }
 

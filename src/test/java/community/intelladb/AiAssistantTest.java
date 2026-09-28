@@ -2,6 +2,7 @@ package community.intelladb;
 
 import community.intelladb.ai.AiAssistant;
 import community.intelladb.ai.ChatMessage;
+import community.intelladb.connection.SqlResult;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -93,5 +94,35 @@ class AiAssistantTest {
             history.add(ChatMessage.assistant("a" + i));
         }
         return history;
+    }
+
+    @Test
+    void describesRowsAsCappedMarkdownTable() {
+        List<Object[]> rows = new ArrayList<>();
+        rows.add(new Object[]{1, "a|b", null});
+        rows.add(new Object[]{2, "line1\nline2", "x".repeat(300)});
+        for (int i = 0; i < 60; i++) {
+            rows.add(new Object[]{i, "r", "v"});
+        }
+        String text = AiAssistant.describeResult(" select * from t ",
+                SqlResult.rows("select * from t", List.of("id", "name", "note"), rows, false, 3));
+        assertTrue(text.startsWith("Query result of:\n```sql\nselect * from t\n```\n62 rows:"));
+        assertTrue(text.contains("| id | name | note |\n| --- | --- | --- |\n| 1 | a\\|b | NULL |"));
+        assertTrue(text.contains("| 2 | line1 line2 | " + "x".repeat(200) + "… |"));
+        assertTrue(text.contains("(12 more rows not shown)"));
+    }
+
+    @Test
+    void describesErrorsAndUpdateCounts() {
+        assertTrue(AiAssistant.describeResult("bad", SqlResult.error("bad", "syntax error", 1))
+                .endsWith("Error: syntax error\n"));
+        assertTrue(AiAssistant.describeResult("update t set x = 1", SqlResult.update("update t set x = 1", 3, 1))
+                .endsWith("3 rows affected\n"));
+    }
+
+    @Test
+    void resultsGoAheadOfTheQuestion() {
+        assertEquals("What next?", AiAssistant.withContext("", "What next?"));
+        assertEquals("Query result of: x\n\nWhat next?", AiAssistant.withContext("Query result of: x\n", "What next?"));
     }
 }

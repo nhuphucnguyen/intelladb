@@ -94,6 +94,8 @@ public final class AiChatPanel extends JPanel implements Disposable {
     private final JButton sendButton = new JButton("Send");
     private final ComboBox<DbConfig> connectionCombo = new ComboBox<>();
     private final Map<String, List<ChatMessage>> historyByConfig = new HashMap<>();
+    /** Inline query results per connection, not yet sent: they go ahead of the next question. */
+    private final Map<String, List<String>> pendingResults = new HashMap<>();
     private boolean updatingCombo;
     private boolean disposed;
     /** Scope for listeners registered by this panel (dispose() is called directly, not via Disposer). */
@@ -228,7 +230,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
             addRow(assistantAnswerRow(turn.answer(), AiAssistant.firstSqlBlock(turn.answer()), config,
                     turn.question(), turn.model()), false);
             List<ChatMessage> history = historyByConfig.computeIfAbsent(turn.connectionId(), k -> new ArrayList<>());
-            history.add(ChatMessage.user(turn.question()));
+            history.add(ChatMessage.user(AiAssistant.withContext(turn.context(), turn.question())));
             history.add(ChatMessage.assistant(turn.answer()));
         }
         historyByConfig.replaceAll((id, history) -> new ArrayList<>(AiAssistant.compact(history,
@@ -298,6 +300,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
         thinkingRow = null;
         chatGeneration++; // drop late callbacks from the previous conversation
         historyByConfig.clear();
+        pendingResults.clear();
         transcript.removeAll();
         sendButton.setEnabled(true);
         transcript.revalidate();
@@ -475,10 +478,14 @@ public final class AiChatPanel extends JPanel implements Disposable {
         List<ChatMessage> history = historyByConfig.computeIfAbsent(current.id, k -> new ArrayList<>());
         showThinking();
 
+        // Results the user ran since the last question travel with this one.
+        List<String> shared = pendingResults.remove(current.id);
+        String context = shared == null ? "" : String.join("\n", shared);
+        String content = AiAssistant.withContext(context, question);
         List<ChatMessage> messages = AiAssistant.conversation(
                 AiAssistant.systemPrompt(session.catalog(), settings.includeSchema()),
                 List.copyOf(history), // append-only: keeps the request prefix cacheable
-                question);
+                content);
         String baseUrl = settings.baseUrl();
         String model = settings.model();
         double temperature = settings.temperature();
@@ -526,9 +533,9 @@ public final class AiChatPanel extends JPanel implements Disposable {
                 String sql = AiAssistant.firstSqlBlock(answer);
                 JPanel answerRow = assistantAnswerRow(answer, sql, current, question, modelLabel);
                 appendMessage(answerRow, false);
-                chats.addTurn(target, new ChatHistory.Turn(current.id, current.name, question, answer,
+                chats.addTurn(target, new ChatHistory.Turn(current.id, current.name, question, context, answer,
                         modelLabel, java.time.LocalDateTime.now()));
-                history.add(ChatMessage.user(question));
+                history.add(ChatMessage.user(content));
                 history.add(ChatMessage.assistant(answer));
                 List<ChatMessage> compacted = AiAssistant.compact(history,
                         AiAssistant.MAX_HISTORY_MESSAGES, AiAssistant.MAX_HISTORY_CHARS);
@@ -668,10 +675,16 @@ public final class AiChatPanel extends JPanel implements Disposable {
             results.showRunning();
             JPanel resultRow = bubble("Query result", results, false);
             appendMessage(resultRow, false);
+            int generation = chatGeneration;
             ApplicationManager.getApplication().executeOnPooledThread(() -> {
                 SqlResult result = session.execute(sql);
                 ApplicationManager.getApplication().invokeLater(() -> {
                     results.showResult(result);
+                    if (generation == chatGeneration) { // still the same conversation
+                        // Shared with the model along with the next question on this connection.
+                        pendingResults.computeIfAbsent(forConfig.id, k -> new ArrayList<>())
+                                .add(AiAssistant.describeResult(sql, result));
+                    }
                     refreshTranscript();
                 });
             });

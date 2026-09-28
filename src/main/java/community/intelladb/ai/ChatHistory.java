@@ -48,10 +48,13 @@ public final class ChatHistory {
     /**
      * One question and its answer.
      *
-     * @param model the model that answered (shown above the answer)
+     * @param context query results the user ran since the previous question, sent to the
+     *                model ahead of the question (not shown in the transcript); "" if none
+     * @param model   the model that answered (shown above the answer)
      */
     public record Turn(@NotNull String connectionId, @NotNull String connectionName, @NotNull String question,
-                       @NotNull String answer, @NotNull String model, @NotNull LocalDateTime at) {
+                       @NotNull String context, @NotNull String answer, @NotNull String model,
+                       @NotNull LocalDateTime at) {
     }
 
     /** A conversation; {@link #turns} grows as the chat continues. */
@@ -193,6 +196,7 @@ public final class ChatHistory {
                 t.addProperty("connectionId", turn.connectionId());
                 t.addProperty("connectionName", turn.connectionName());
                 t.addProperty("question", turn.question());
+                t.addProperty("context", turn.context());
                 t.addProperty("answer", turn.answer());
                 t.addProperty("model", turn.model());
                 t.addProperty("at", turn.at().toString());
@@ -222,6 +226,7 @@ public final class ChatHistory {
                     JsonObject turn = t.getAsJsonObject();
                     conversation.turns.add(new Turn(turn.get("connectionId").getAsString(),
                             turn.get("connectionName").getAsString(), turn.get("question").getAsString(),
+                            turn.has("context") ? turn.get("context").getAsString() : "",
                             turn.get("answer").getAsString(), turn.get("model").getAsString(),
                             LocalDateTime.parse(turn.get("at").getAsString())));
                 }
