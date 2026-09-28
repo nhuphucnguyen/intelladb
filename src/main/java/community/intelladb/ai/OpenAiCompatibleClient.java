@@ -92,6 +92,15 @@ public final class OpenAiCompatibleClient {
             String content = message != null && message.has("content") && !message.get("content").isJsonNull()
                     ? message.get("content").getAsString() : "";
             if (content.isBlank()) {
+                // Reasoning models (GLM etc.) can burn the whole budget in reasoning_content.
+                String reasoning = message != null && message.has("reasoning_content")
+                        && !message.get("reasoning_content").isJsonNull()
+                        ? message.get("reasoning_content").getAsString() : "";
+                if (!reasoning.isBlank()) {
+                    throw new AiException("The model spent its whole token budget on reasoning without "
+                            + "producing a final answer.\nIncrease Max tokens in "
+                            + "Settings → Tools → Intella DB — AI Provider.");
+                }
                 throw new AiException("AI provider returned an empty answer.");
             }
             return content;

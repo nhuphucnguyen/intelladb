@@ -24,7 +24,7 @@ public final class AiSettings implements PersistentStateComponent<AiSettings.Sta
         public String baseUrl = AiPreset.ZAI_CODING_PLAN.baseUrl();
         public String model = AiPreset.ZAI_CODING_PLAN.defaultModel();
         public double temperature = 0.2;
-        public int maxTokens = 1024;
+        public int maxTokens = 2048;
         public boolean includeSchema = true;
     }
 
