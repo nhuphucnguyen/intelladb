@@ -4,9 +4,11 @@ import community.intelladb.ai.AiAssistant;
 import community.intelladb.ai.ChatMessage;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -47,13 +49,49 @@ class AiAssistantTest {
     }
 
     @Test
-    void trimKeepsTail() {
-        List<ChatMessage> history = List.of(
-                ChatMessage.user("1"), ChatMessage.assistant("1"),
-                ChatMessage.user("2"), ChatMessage.assistant("2"),
-                ChatMessage.user("3"), ChatMessage.assistant("3"));
-        assertEquals(4, AiAssistant.trim(history, 4).size());
-        assertEquals("2", AiAssistant.trim(history, 4).get(0).content());
-        assertEquals(6, AiAssistant.trim(history, 100).size());
+    void compactLeavesHistoryUntouchedWithinLimits() {
+        List<ChatMessage> history = exchanges(3);
+        assertSame(history, AiAssistant.compact(history, 10, 10_000));
+    }
+
+    @Test
+    void compactDropsOldestHalfInOneStep() {
+        List<ChatMessage> history = exchanges(6); // 12 messages > 10
+        List<ChatMessage> compacted = AiAssistant.compact(history, 10, 10_000);
+        assertEquals(4, compacted.size()); // down to <= half, whole exchanges only
+        assertEquals("q4", compacted.get(0).content());
+        assertEquals("user", compacted.get(0).role());
+        assertEquals("a5", compacted.get(3).content());
+    }
+
+    @Test
+    void appendAfterCompactionKeepsPrefixStable() {
+        List<ChatMessage> history = AiAssistant.compact(exchanges(6), 10, 10_000);
+        List<ChatMessage> before = List.copyOf(history);
+        history.add(ChatMessage.user("next"));
+        history.add(ChatMessage.assistant("answer"));
+        assertSame(history, AiAssistant.compact(history, 10, 10_000));
+        assertEquals(before, history.subList(0, before.size())); // same leading messages → cache hit
+    }
+
+    @Test
+    void compactAlsoHonoursCharacterBudget() {
+        List<ChatMessage> history = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            history.add(ChatMessage.user("q" + i));
+            history.add(ChatMessage.assistant("x".repeat(100)));
+        }
+        List<ChatMessage> compacted = AiAssistant.compact(history, 100, 300);
+        assertEquals(2, compacted.size());
+        assertEquals("q3", compacted.get(0).content());
+    }
+
+    private static List<ChatMessage> exchanges(int count) {
+        List<ChatMessage> history = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            history.add(ChatMessage.user("q" + i));
+            history.add(ChatMessage.assistant("a" + i));
+        }
+        return history;
     }
 }

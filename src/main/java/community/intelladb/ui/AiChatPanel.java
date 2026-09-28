@@ -353,11 +353,12 @@ public final class AiChatPanel extends JPanel implements Disposable {
 
         List<ChatMessage> messages = AiAssistant.conversation(
                 AiAssistant.systemPrompt(session.catalog(), settings.includeSchema()),
-                AiAssistant.trim(history, 10),
+                List.copyOf(history), // append-only: keeps the request prefix cacheable
                 question);
         String baseUrl = settings.baseUrl();
         String model = settings.model();
         double temperature = settings.temperature();
+        double topP = settings.topP();
         int maxTokens = settings.maxTokens();
         boolean localProvider = settings.presetId().equals("ollama") || settings.presetId().equals("lmstudio");
 
@@ -372,7 +373,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
                         + "Open Settings → Tools → Intella DB — AI Provider.");
             }
             OpenAiCompatibleClient client = new OpenAiCompatibleClient(
-                    baseUrl, key == null ? "" : key, model, temperature, maxTokens);
+                    baseUrl, key == null ? "" : key, model, temperature, topP, maxTokens);
             return client.chat(messages);
         });
         pending = future;
@@ -400,6 +401,12 @@ public final class AiChatPanel extends JPanel implements Disposable {
                 appendMessage(answerRow, false);
                 history.add(ChatMessage.user(question));
                 history.add(ChatMessage.assistant(answer));
+                List<ChatMessage> compacted = AiAssistant.compact(history,
+                        AiAssistant.MAX_HISTORY_MESSAGES, AiAssistant.MAX_HISTORY_CHARS);
+                if (compacted != history) {
+                    history.clear();
+                    history.addAll(compacted);
+                }
             }
         }));
     }

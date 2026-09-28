@@ -35,7 +35,10 @@ public final class AiProviderConfigurable implements Configurable {
     private JBPasswordField apiKey;
     private com.intellij.openapi.ui.ComboBox<String> model;
     private JSpinner temperature;
+    private JSpinner topP;
     private JSpinner maxTokens;
+    private SpinnerNumberModel maxTokensModel;
+    private JBLabel samplingHint;
     private JBCheckBox includeSchema;
     private JBLabel testStatus;
 
@@ -59,7 +62,11 @@ public final class AiProviderConfigurable implements Configurable {
         model = new com.intellij.openapi.ui.ComboBox<>();
         model.setEditable(true);
         temperature = new JSpinner(new SpinnerNumberModel(Double.valueOf(0.2), Double.valueOf(0), Double.valueOf(2), Double.valueOf(0.1)));
-        maxTokens = new JSpinner(new SpinnerNumberModel(1024, 64, 32768, 64));
+        topP = new JSpinner(new SpinnerNumberModel(Double.valueOf(1.0), Double.valueOf(0), Double.valueOf(1), Double.valueOf(0.05)));
+        maxTokensModel = new SpinnerNumberModel(2048, 64, 32768, 512);
+        maxTokens = new JSpinner(maxTokensModel);
+        samplingHint = new JBLabel(" ");
+        samplingHint.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
         includeSchema = new JBCheckBox("Include database schema in the AI prompt (recommended)", true);
         testStatus = new JBLabel(" ");
         javax.swing.JButton testButton = new javax.swing.JButton("Test Provider");
@@ -69,6 +76,7 @@ public final class AiProviderConfigurable implements Configurable {
             if (e.getStateChange() == ItemEvent.SELECTED && presetCombo.getSelectedItem() instanceof AiPreset preset) {
                 baseUrl.setText(preset.baseUrl());
                 applyModelChoices(preset);
+                applySamplingDefaults(preset);
             }
         });
 
@@ -85,7 +93,9 @@ public final class AiProviderConfigurable implements Configurable {
                 .addComponent(new JBLabel("    Stored in the IDE secure credential store — never in project files."), 2)
                 .addLabeledComponent("Model:", model)
                 .addLabeledComponent("Temperature:", temperature)
-                .addLabeledComponent("Max tokens:", maxTokens)
+                .addLabeledComponent("Top P:", topP)
+                .addLabeledComponent("Max output tokens:", maxTokens)
+                .addComponent(samplingHint, 2)
                 .addComponent(includeSchema, 4)
                 .addComponent(testRow, 10)
                 .addComponentFillVertically(new JPanel(), 0)
@@ -125,6 +135,7 @@ public final class AiProviderConfigurable implements Configurable {
                 || presetCombo.getSelectedIndex() != presetIndexOf(settings.presetId())
                 || !String.valueOf(apiKey.getPassword()).isBlank()
                 || ((Number) temperature.getValue()).doubleValue() != settings.temperature()
+                || ((Number) topP.getValue()).doubleValue() != settings.topP()
                 || ((Number) maxTokens.getValue()).intValue() != settings.maxTokens()
                 || includeSchema.isSelected() != settings.includeSchema();
     }
@@ -137,6 +148,7 @@ public final class AiProviderConfigurable implements Configurable {
                 baseUrl.getText().trim(),
                 selectedModel(),
                 ((Number) temperature.getValue()).doubleValue(),
+                ((Number) topP.getValue()).doubleValue(),
                 ((Number) maxTokens.getValue()).intValue(),
                 includeSchema.isSelected());
         if (!key.isBlank()) {
@@ -155,8 +167,11 @@ public final class AiProviderConfigurable implements Configurable {
         baseUrl.setText(settings.baseUrl());
         applyModelChoices(preset != null ? preset : AiPreset.CUSTOM);
         selectModel(settings.model());
+        showSamplingLimits(preset != null ? preset : AiPreset.CUSTOM);
         temperature.setValue(settings.temperature());
-        maxTokens.setValue(settings.maxTokens());
+        topP.setValue(settings.topP());
+        maxTokens.setValue(Math.min(settings.maxTokens(), maxTokensModel.getMaximum() instanceof Integer max
+                ? max : Integer.MAX_VALUE));
         includeSchema.setSelected(settings.includeSchema());
         // PasswordSafe must not be read on the EDT; refresh the hint asynchronously.
         apiKey.getEmptyText().setText("Paste your API key");
@@ -166,6 +181,24 @@ public final class AiProviderConfigurable implements Configurable {
                     apiKey.getEmptyText().setText(saved
                             ? "A key is saved (leave empty to keep it)" : "Paste your API key"));
         });
+    }
+
+    /** Switching preset loads its recommended temperature / top_p / output budget. */
+    private void applySamplingDefaults(@NotNull AiPreset preset) {
+        AiPreset.Sampling sampling = preset.sampling();
+        showSamplingLimits(preset);
+        temperature.setValue(sampling.temperature());
+        topP.setValue(sampling.topP());
+        maxTokens.setValue(sampling.maxTokens());
+    }
+
+    /** Output-token upper bound and the "recommended" hint for the preset. */
+    private void showSamplingLimits(@NotNull AiPreset preset) {
+        AiPreset.Sampling sampling = preset.sampling();
+        maxTokensModel.setMaximum(sampling.maxTokensLimit());
+        samplingHint.setText("Recommended for this provider: temperature " + sampling.temperature()
+                + ", top P " + sampling.topP() + ", up to " + sampling.maxTokensLimit() + " output tokens"
+                + (sampling == AiPreset.Sampling.GLM_5_3 ? " (GLM-5.3 always reasons first)." : "."));
     }
 
     /** Fills the model dropdown with the preset's suggested ids; free text stays allowed. */

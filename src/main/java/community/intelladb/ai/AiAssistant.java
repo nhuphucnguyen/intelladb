@@ -59,12 +59,39 @@ public final class AiAssistant {
         return messages;
     }
 
-    /** Trims history to the last N exchanges (roles alternate user/assistant). */
-    public static @NotNull List<ChatMessage> trim(@NotNull List<ChatMessage> history, int keepMessages) {
-        if (history.size() <= keepMessages) {
-            return List.copyOf(history);
+    /** History limits: generous enough for a working session, bounded for cost. */
+    public static final int MAX_HISTORY_MESSAGES = 40;          // 20 question/answer exchanges
+    public static final int MAX_HISTORY_CHARS = 200_000;        // ~50K tokens
+
+    /**
+     * Keeps the conversation cache-friendly. Providers with prefix (context) caching — Z.ai
+     * GLM, OpenAI, DeepSeek — bill repeated leading input at a discount, but only while the
+     * request starts with exactly the same messages as before. A sliding window ("last N")
+     * drops the oldest message on every turn, so nothing after the system prompt ever hits
+     * the cache. Instead the history is append-only and, once it exceeds a limit, the
+     * oldest half is dropped in one step (whole user/assistant exchanges), after which the
+     * prefix is stable again for many turns.
+     *
+     * @return {@code history} itself when within limits, otherwise a compacted copy
+     */
+    public static @NotNull List<ChatMessage> compact(@NotNull List<ChatMessage> history,
+                                                     int maxMessages, int maxChars) {
+        if (history.size() <= maxMessages && chars(history) <= maxChars) {
+            return history;
         }
-        return List.copyOf(history.subList(history.size() - keepMessages, history.size()));
+        List<ChatMessage> kept = history;
+        while (kept.size() > 2 && (kept.size() > maxMessages / 2 || chars(kept) > maxChars / 2)) {
+            kept = kept.subList(2, kept.size()); // one user/assistant exchange at a time
+        }
+        return new ArrayList<>(kept);
+    }
+
+    private static int chars(@NotNull List<ChatMessage> messages) {
+        int total = 0;
+        for (ChatMessage message : messages) {
+            total += message.content().length();
+        }
+        return total;
     }
 
     private AiAssistant() {

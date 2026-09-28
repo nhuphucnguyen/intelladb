@@ -36,9 +36,11 @@ public final class AiCredentials {
     public static @NotNull String ping() {
         AiSettings settings = AiSettings.getInstance();
         String key = read();
-        // GLM reasoning models spend tokens on reasoning_content before content — budget enough.
+        // GLM reasoning models always think before answering (reasoning_content) — give the
+        // ping enough budget to reach the answer, but keep it bounded.
         OpenAiCompatibleClient client = new OpenAiCompatibleClient(
-                settings.baseUrl(), key == null ? "" : key, settings.model(), 0.0, 512);
+                settings.baseUrl(), key == null ? "" : key, settings.model(),
+                settings.temperature(), settings.topP(), Math.min(settings.maxTokens(), 4096));
         return client.chat(List.of(ChatMessage.user("Reply with exactly: OK")));
     }
 

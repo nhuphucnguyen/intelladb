@@ -10,14 +10,32 @@ import java.util.List;
  * format, which covers Z.ai GLM (coding plan and standard API), OpenAI, DeepSeek, OpenRouter,
  * local Ollama, and any other compatible gateway.
  *
- * @param models suggested model ids shown in the settings dropdown; any other id can still be typed.
+ * @param models   suggested model ids shown in the settings dropdown; any other id can still be typed.
+ * @param sampling the provider's recommended generation settings (defaults of the settings page).
  */
 public record AiPreset(@NotNull String id, @NotNull String label, @NotNull String baseUrl,
-                       @NotNull String defaultModel, @NotNull List<String> models, boolean needsApiKey) {
+                       @NotNull String defaultModel, @NotNull List<String> models, boolean needsApiKey,
+                       @NotNull Sampling sampling) {
+
+    /**
+     * Recommended generation settings.
+     *
+     * @param maxTokensLimit the most output tokens the models accept (upper bound of the setting)
+     */
+    public record Sampling(double temperature, double topP, int maxTokens, int maxTokensLimit) {
+        /** Conservative defaults for SQL generation on generic OpenAI-compatible models. */
+        public static final Sampling STANDARD = new Sampling(0.2, 1.0, 2048, 32768);
+        /**
+         * Z.ai's recommendation for GLM-5.3 / GLM-5.3-Flash: temperature 1.0, top_p 0.95, up
+         * to 128K output tokens. Reasoning is always on and cannot be disabled, so the default
+         * budget is generous — a small one can be spent entirely on reasoning_content.
+         */
+        public static final Sampling GLM_5_3 = new Sampling(1.0, 0.95, 32768, 131072);
+    }
 
     public AiPreset(@NotNull String id, @NotNull String label, @NotNull String baseUrl,
                     @NotNull String defaultModel, boolean needsApiKey) {
-        this(id, label, baseUrl, defaultModel, List.of(defaultModel), needsApiKey);
+        this(id, label, baseUrl, defaultModel, List.of(defaultModel), needsApiKey, Sampling.STANDARD);
     }
 
     public static final AiPreset CUSTOM =
@@ -26,12 +44,12 @@ public record AiPreset(@NotNull String id, @NotNull String label, @NotNull Strin
     public static final AiPreset ZAI_CODING_PLAN =
             new AiPreset("zai-coding-plan", "Z.ai GLM — Coding Plan",
                     "https://api.z.ai/api/coding/paas/v4", "glm-5.3",
-                    List.of("glm-5.3", "glm-5.3-flash"), true);
+                    List.of("glm-5.3", "glm-5.3-flash"), true, Sampling.GLM_5_3);
 
     public static final AiPreset ZAI_API =
             new AiPreset("zai-api", "Z.ai GLM — Standard API",
                     "https://api.z.ai/api/paas/v4", "glm-5.3",
-                    List.of("glm-5.3", "glm-5.3-flash"), true);
+                    List.of("glm-5.3", "glm-5.3-flash"), true, Sampling.GLM_5_3);
 
     public static final AiPreset BIGMODEL =
             new AiPreset("bigmodel", "Zhipu BigModel (open.bigmodel.cn)",

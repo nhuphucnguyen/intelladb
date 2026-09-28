@@ -61,7 +61,7 @@ class OpenAiCompatibleClientTest {
 
     private OpenAiCompatibleClient client() {
         return new OpenAiCompatibleClient(
-                "http://127.0.0.1:" + server.getAddress().getPort() + "/v1", "sk-test-key", "glm-4.6", 0.2, 512);
+                "http://127.0.0.1:" + server.getAddress().getPort() + "/v1", "sk-test-key", "glm-4.6", 0.2, 0.95, 512);
     }
 
     @Test
@@ -75,6 +75,7 @@ class OpenAiCompatibleClientTest {
         JsonObject body = lastBody.get();
         assertEquals("glm-4.6", body.get("model").getAsString());
         assertEquals(0.2, body.get("temperature").getAsDouble(), 1e-9);
+        assertEquals(0.95, body.get("top_p").getAsDouble(), 1e-9);
         assertEquals(512, body.get("max_tokens").getAsInt());
         assertEquals(2, body.getAsJsonArray("messages").size());
         assertEquals("system", body.getAsJsonArray("messages").get(0).getAsJsonObject().get("role").getAsString());
@@ -107,7 +108,7 @@ class OpenAiCompatibleClientTest {
     @Test
     void unreachableServerBecomesAiException() {
         OpenAiCompatibleClient dead = new OpenAiCompatibleClient(
-                "http://127.0.0.1:1/v1", "", "m", 0.0, 16);
+                "http://127.0.0.1:1/v1", "", "m", 0.0, 1.0, 16);
         AiException exception = assertThrows(AiException.class, () ->
                 dead.chat(List.of(ChatMessage.user("hi"))));
         assertTrue(exception.getMessage().contains("Could not reach"));
