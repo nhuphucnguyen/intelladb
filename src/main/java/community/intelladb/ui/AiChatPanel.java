@@ -424,7 +424,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
                 appendMessage(bubble(null, errorBody(message), false), false);
             } else {
                 String sql = AiAssistant.firstSqlBlock(answer);
-                JPanel answerRow = assistantAnswerRow(answer, sql, current);
+                JPanel answerRow = assistantAnswerRow(answer, sql, current, question);
                 appendMessage(answerRow, false);
                 history.add(ChatMessage.user(question));
                 history.add(ChatMessage.assistant(answer));
@@ -467,7 +467,8 @@ public final class AiChatPanel extends JPanel implements Disposable {
         }
     }
 
-    private @NotNull JPanel assistantAnswerRow(@NotNull String answer, @Nullable String sql, @NotNull DbConfig forConfig) {
+    private @NotNull JPanel assistantAnswerRow(@NotNull String answer, @Nullable String sql, @NotNull DbConfig forConfig,
+                                              @NotNull String question) {
         JPanel stack = new JPanel();
         stack.setLayout(new javax.swing.BoxLayout(stack, javax.swing.BoxLayout.Y_AXIS));
         stack.setOpaque(false);
@@ -487,7 +488,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
             JButton run = new JButton("Run", AllIcons.Actions.Execute);
             run.addActionListener(e -> runSqlInline(forConfig, sql));
             JButton toConsole = new JButton("Insert into Console", AllIcons.Nodes.Console);
-            toConsole.addActionListener(e -> insertIntoConsole(forConfig, sql));
+            toConsole.addActionListener(e -> insertIntoConsole(forConfig, question, sql));
             JButton copy = new JButton("Copy", AllIcons.Actions.Copy);
             copy.addActionListener(e -> CopyPasteManager.getInstance().setContents(new StringSelection(sql)));
             actions.add(run);
@@ -570,8 +571,11 @@ public final class AiChatPanel extends JPanel implements Disposable {
         });
     }
 
-    /** Hands the SQL to the DB Explorer's console (activating it if needed). */
-    private void insertIntoConsole(@NotNull DbConfig forConfig, @NotNull String sql) {
+    /**
+     * Appends the SQL to the end of the DB Explorer's console (activating it if needed),
+     * under a comment quoting the prompt it answers; the console's existing text is kept.
+     */
+    private void insertIntoConsole(@NotNull DbConfig forConfig, @NotNull String question, @NotNull String sql) {
         var toolWindow = ToolWindowManager.getInstance(project).getToolWindow(DbToolWindowFactory.TOOL_WINDOW_ID);
         if (toolWindow == null) {
             return;
@@ -579,10 +583,20 @@ public final class AiChatPanel extends JPanel implements Disposable {
         toolWindow.activate(() -> {
             for (var content : toolWindow.getContentManager().getContents()) {
                 if (content.getComponent() instanceof DbExplorerPanel explorer) {
-                    explorer.openConsole(forConfig, sql);
+                    explorer.openConsole(forConfig).appendSql(promptComment(question), sql.strip());
                 }
             }
         });
+    }
+
+    /** {@code -- AI Assistant: <prompt>}, one comment line per prompt line. */
+    static @NotNull String promptComment(@NotNull String question) {
+        StringBuilder comment = new StringBuilder();
+        String[] lines = question.strip().split("\\R");
+        for (int i = 0; i < lines.length; i++) {
+            comment.append(i == 0 ? "-- AI Assistant: " : "--   ").append(lines[i].strip()).append('\n');
+        }
+        return comment.toString();
     }
 
     private void appendMessage(@NotNull JPanel row, boolean right) {

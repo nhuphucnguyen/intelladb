@@ -157,6 +157,24 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         toolbars.forEach(ActionToolbar::updateActionsAsync); // show it now, not on the next UI tick
     }
 
+    /**
+     * Adds {@code comment} + {@code sql} at the very end of the console, a blank line after
+     * the existing text, and puts the caret on the SQL so Execute (Playground) runs it.
+     */
+    public void appendSql(@NotNull String comment, @NotNull String sql) {
+        WriteCommandAction.runWriteCommandAction(project, () -> {
+            String text = document.getText();
+            String separator = text.isBlank() ? "" : text.endsWith("\n\n") ? "" : text.endsWith("\n") ? "\n" : "\n\n";
+            int start = document.getTextLength() + separator.length() + comment.length();
+            document.insertString(document.getTextLength(), separator + comment + sql + "\n");
+            Editor editor = FileEditorManager.getInstance(project).getSelectedTextEditor();
+            if (editor != null && editor.getDocument() == document) {
+                editor.getCaretModel().moveToOffset(start);
+                editor.getScrollingModel().scrollToCaret(com.intellij.openapi.editor.ScrollType.MAKE_VISIBLE);
+            }
+        });
+    }
+
     // ------------------------------------------------------------------ editor header
 
     /** Adds the console toolbar above a text editor showing this console (idempotent). */
