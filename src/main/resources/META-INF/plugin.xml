@@ -16,47 +16,47 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow id="DB Explorer" anchor="right" canCloseContents="false"
-                    factoryClass="community.intelladb.ui.DbToolWindowFactory"/>
+                    factoryClass="dev.phucngu.intelladb.ui.DbToolWindowFactory"/>
 
         <!-- Console output + result sets, like IntelliJ's Services view for database consoles -->
         <toolWindow id="DB Services" anchor="bottom" canCloseContents="false"
                     icon="AllIcons.Toolwindows.ToolWindowServices"
-                    factoryClass="community.intelladb.ui.DbServicesToolWindowFactory"/>
+                    factoryClass="dev.phucngu.intelladb.ui.DbServicesToolWindowFactory"/>
 
-        <fileEditorProvider implementation="community.intelladb.ui.IntellaDbFileEditorProvider"/>
+        <fileEditorProvider implementation="dev.phucngu.intelladb.ui.IntellaDbFileEditorProvider"/>
 
         <!-- SQL console tabs: "console [@name]" title and console icon -->
-        <editorTabTitleProvider implementation="community.intelladb.ui.ConsoleFilePresentation"/>
-        <fileIconProvider implementation="community.intelladb.ui.ConsoleFilePresentation"/>
+        <editorTabTitleProvider implementation="dev.phucngu.intelladb.ui.ConsoleFilePresentation"/>
+        <fileIconProvider implementation="dev.phucngu.intelladb.ui.ConsoleFilePresentation"/>
 
-        <applicationService serviceImplementation="community.intelladb.ai.AiSettings"/>
+        <applicationService serviceImplementation="dev.phucngu.intelladb.ai.AiSettings"/>
 
         <applicationConfigurable parentId="tools"
                                  id="community.intelladb.ai.provider"
                                  displayName="Intella DB — AI Provider"
-                                 instance="community.intelladb.settings.AiProviderConfigurable"/>
+                                 instance="dev.phucngu.intelladb.settings.AiProviderConfigurable"/>
 
         <notificationGroup id="IntellaDB" displayType="BALLOON"/>
 
         <!-- Liquibase: SQL highlighting inside <sql> elements of XML changelogs -->
-        <languageInjector implementation="community.intelladb.liquibase.LiquibaseSqlInjector"/>
+        <languageInjector implementation="dev.phucngu.intelladb.liquibase.LiquibaseSqlInjector"/>
 
         <!-- IntellaSQL fallback language (highlighting for injected SQL when no platform SQL language) -->
         <lang.syntaxHighlighterFactory language="IntellaSQL"
-                                       implementationClass="community.intelladb.sql.IntellaSqlSyntaxHighlighter$Factory"/>
+                                       implementationClass="dev.phucngu.intelladb.sql.IntellaSqlSyntaxHighlighter$Factory"/>
         <lang.parserDefinition language="IntellaSQL"
-                               implementationClass="community.intelladb.sql.IntellaSqlParserDefinition"/>
+                               implementationClass="dev.phucngu.intelladb.sql.IntellaSqlParserDefinition"/>
 
         <!-- INSERT column <-> value aid (caret highlighting + inline column hints) -->
-        <postStartupActivity implementation="community.intelladb.sql.SqlColumnValueAidStartup"/>
+        <postStartupActivity implementation="dev.phucngu.intelladb.sql.SqlColumnValueAidStartup"/>
 
         <!-- reopens the SQL console tabs that were open at the last close -->
-        <postStartupActivity implementation="community.intelladb.ui.ConsoleRestoreStartup"/>
+        <postStartupActivity implementation="dev.phucngu.intelladb.ui.ConsoleRestoreStartup"/>
     </extensions>
 
     <projectListeners>
         <!-- installs the console header toolbar whenever a console tab (re)opens -->
-        <listener class="community.intelladb.ui.ConsoleFilePresentation"
+        <listener class="dev.phucngu.intelladb.ui.ConsoleFilePresentation"
                   topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
     </projectListeners>
 </idea-plugin>

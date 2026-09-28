@@ -3,7 +3,7 @@ plugins {
     id("org.jetbrains.intellij.platform") version "2.18.1"
 }
 
-group = "community.intelladb"
+group = "dev.phucngu.intelladb"
 version = "0.3.1"
 
 java {
