@@ -64,4 +64,25 @@ class SqlSplitterTest {
         assertEquals(2, result.size());
         assertEquals("SELECT \"weird;col\" FROM t", result.get(0));
     }
+
+    @Test
+    void rangesPointBackIntoTheScript() {
+        String sql = "  SELECT 1;\n\nSELECT 'a;b' ;  ";
+        List<SqlSplitter.Statement> ranges = SqlSplitter.ranges(sql);
+        assertEquals(2, ranges.size());
+        for (SqlSplitter.Statement statement : ranges) {
+            assertEquals(statement.text(), sql.substring(statement.start(), statement.end()));
+        }
+        assertEquals("SELECT 'a;b'", ranges.get(1).text());
+    }
+
+    @Test
+    void statementAtCaretPrefersContainingThenPrevious() {
+        String sql = "SELECT 1;\nSELECT 2;\n\n";
+        assertEquals("SELECT 1", SqlSplitter.at(sql, 3).text());
+        assertEquals("SELECT 2", SqlSplitter.at(sql, sql.indexOf("2")).text());
+        assertEquals("SELECT 2", SqlSplitter.at(sql, sql.length()).text()); // blank line below
+        assertEquals("SELECT 1", SqlSplitter.at("\n\nSELECT 1", 0).text()); // above the first
+        assertEquals(null, SqlSplitter.at("  ", 1));
+    }
 }

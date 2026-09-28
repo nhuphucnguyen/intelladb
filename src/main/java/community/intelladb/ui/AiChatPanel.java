@@ -545,10 +545,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
         toolWindow.activate(() -> {
             for (var content : toolWindow.getContentManager().getContents()) {
                 if (content.getComponent() instanceof DbExplorerPanel explorer) {
-                    ConsolePanel console = explorer.openConsole(forConfig);
-                    if (console != null) {
-                        console.setSql(sql);
-                    }
+                    explorer.openConsole(forConfig, sql);
                 }
             }
         });

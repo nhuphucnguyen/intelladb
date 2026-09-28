@@ -14,6 +14,8 @@ public final class SqlResult {
     public final Kind kind;
     /** Column labels for {@link Kind#ROWS}. */
     public final List<String> columns;
+    /** Database type name per column (e.g. {@code int8}, {@code varchar}); empty when unknown. */
+    public final List<String> columnTypes;
     /** Row values for {@link Kind#ROWS} (already String.valueOf'd). */
     public final List<Object[]> rows;
     /** True when the result set was truncated to {@link #MAX_ROWS}. */
@@ -27,10 +29,11 @@ public final class SqlResult {
     /** SQL that produced this result. */
     public final String sql;
 
-    private SqlResult(Kind kind, List<String> columns, List<Object[]> rows, boolean truncated,
-                      long updateCount, String text, long durationMs, String sql) {
+    private SqlResult(Kind kind, List<String> columns, List<String> columnTypes, List<Object[]> rows,
+                      boolean truncated, long updateCount, String text, long durationMs, String sql) {
         this.kind = kind;
         this.columns = columns;
+        this.columnTypes = columnTypes;
         this.rows = rows;
         this.truncated = truncated;
         this.updateCount = updateCount;
@@ -41,19 +44,30 @@ public final class SqlResult {
 
     public static SqlResult rows(@NotNull String sql, @NotNull List<String> columns,
                                  @NotNull List<Object[]> rows, boolean truncated, long durationMs) {
-        return new SqlResult(Kind.ROWS, columns, rows, truncated, -1, null, durationMs, sql);
+        return rows(sql, columns, List.of(), rows, truncated, durationMs);
+    }
+
+    public static SqlResult rows(@NotNull String sql, @NotNull List<String> columns,
+                                 @NotNull List<String> columnTypes, @NotNull List<Object[]> rows,
+                                 boolean truncated, long durationMs) {
+        return new SqlResult(Kind.ROWS, columns, columnTypes, rows, truncated, -1, null, durationMs, sql);
     }
 
     public static SqlResult update(@NotNull String sql, long updateCount, long durationMs) {
-        return new SqlResult(Kind.UPDATE_COUNT, List.of(), List.of(), false, updateCount, null, durationMs, sql);
+        return new SqlResult(Kind.UPDATE_COUNT, List.of(), List.of(), List.of(), false, updateCount, null, durationMs, sql);
     }
 
     public static SqlResult message(@NotNull String sql, @NotNull String text, long durationMs) {
-        return new SqlResult(Kind.MESSAGE, List.of(), List.of(), false, -1, text, durationMs, sql);
+        return new SqlResult(Kind.MESSAGE, List.of(), List.of(), List.of(), false, -1, text, durationMs, sql);
     }
 
     public static SqlResult error(@NotNull String sql, @NotNull String text, long durationMs) {
-        return new SqlResult(Kind.ERROR, List.of(), List.of(), false, -1, text, durationMs, sql);
+        return new SqlResult(Kind.ERROR, List.of(), List.of(), List.of(), false, -1, text, durationMs, sql);
+    }
+
+    /** Type name of column {@code index}, or "" when the driver did not report one. */
+    public @NotNull String columnType(int index) {
+        return index < columnTypes.size() ? columnTypes.get(index) : "";
     }
 
     public boolean isSuccessful() {

@@ -160,35 +160,33 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
 
     // ------------------------------------------------------------------ tab management
 
-    /** Per-connection consoles live as editor tabs; the instance survives tab close. */
-    private final java.util.Map<String, ConsolePanel> consoles = new java.util.HashMap<>();
-    private final java.util.Map<String, com.intellij.openapi.vfs.VirtualFile> consoleFiles = new java.util.HashMap<>();
-    private int consoleSeq;
+    /** One console per connection; it lives on (text included) after its tab is closed. */
+    private final java.util.Map<String, SqlConsole> consoles = new java.util.HashMap<>();
 
     /**
      * Opens (or focuses) the SQL console for the connection as an editor tab — the way
-     * IntelliJ's database tools do it: consoles live in the editor, not in the explorer.
-     * When {@code sql} is given it replaces the console text (Insert into Console).
+     * IntelliJ's database tools do it: a text editor with a console toolbar, results in
+     * the DB Services tool window.
      */
-    public @Nullable ConsolePanel openConsole(@NotNull DbConfig config) {
+    public @NotNull SqlConsole openConsole(@NotNull DbConfig config) {
         return openConsole(config, null);
     }
 
-    public @Nullable ConsolePanel openConsole(@NotNull DbConfig config, @Nullable String sql) {
-        ConsolePanel console = consoles.computeIfAbsent(config.id,
-                id -> new ConsolePanel(project, this, config));
+    /** As {@link #openConsole(DbConfig)}; a non-null {@code sql} replaces the console text. */
+    public @NotNull SqlConsole openConsole(@NotNull DbConfig config, @Nullable String sql) {
+        SqlConsole console = consoles.computeIfAbsent(config.id, id -> {
+            SqlConsole created = new SqlConsole(project, this, config);
+            Disposer.register(this, created);
+            return created;
+        });
         if (sql != null) {
             console.setSql(sql);
         }
-        com.intellij.openapi.vfs.VirtualFile file = consoleFiles.get(config.id);
-        if (file == null) {
-            file = new com.intellij.testFramework.LightVirtualFile(
-                    "console_" + (++consoleSeq) + ".sql @" + config.name,
-                    community.intelladb.sql.IntellaSqlFileType.INSTANCE, console.sql());
-            IntellaDbFileEditorProvider.attach(file, () -> console);
-            consoleFiles.put(config.id, file);
+        var editors = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
+                .openFile(console.file(), true);
+        for (var editor : editors) {
+            console.installHeader(editor); // idempotent; the file listener covers later reopens
         }
-        com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).openFile(file, true);
         return console;
     }
 
@@ -216,7 +214,21 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         com.intellij.testFramework.LightVirtualFile file = new com.intellij.testFramework.LightVirtualFile(
                 table.name() + " @" + table.config().name,
                 com.intellij.openapi.fileTypes.PlainTextFileType.INSTANCE, "");
-        ResultsPanel panel = new ResultsPanel(project);
+        ResultsPanel panel = new ResultsPanel(project, new ResultsPanel.Host() {
+            @Override
+            public void rerun(@NotNull ResultsPanel target) {
+                table.showIn(DbExplorerPanel.this, target);
+            }
+
+            @Override
+            public void cancel() {
+                DbSession session = sessionOf(table.config());
+                if (session != null) {
+                    ApplicationManager.getApplication().executeOnPooledThread(session::cancel);
+                }
+            }
+        }, false);
+        panel.setSourceTable(table.qualifiedName());
         IntellaDbFileEditorProvider.attach(file, () -> panel);
         com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).openFile(file, true);
         table.showIn(this, panel);

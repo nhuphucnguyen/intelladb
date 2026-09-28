@@ -18,7 +18,16 @@
         <toolWindow id="DB Explorer" anchor="right" canCloseContents="false"
                     factoryClass="community.intelladb.ui.DbToolWindowFactory"/>
 
+        <!-- Console output + result sets, like IntelliJ's Services view for database consoles -->
+        <toolWindow id="DB Services" anchor="bottom" canCloseContents="false"
+                    icon="AllIcons.Toolwindows.ToolWindowServices"
+                    factoryClass="community.intelladb.ui.DbServicesToolWindowFactory"/>
+
         <fileEditorProvider implementation="community.intelladb.ui.IntellaDbFileEditorProvider"/>
+
+        <!-- SQL console tabs: "console [@name]" title and console icon -->
+        <editorTabTitleProvider implementation="community.intelladb.ui.ConsoleFilePresentation"/>
+        <fileIconProvider implementation="community.intelladb.ui.ConsoleFilePresentation"/>
 
         <applicationService serviceImplementation="community.intelladb.ai.AiSettings"/>
 
@@ -41,4 +50,10 @@
         <!-- INSERT column <-> value aid (caret highlighting + inline column hints) -->
         <postStartupActivity implementation="community.intelladb.sql.SqlColumnValueAidStartup"/>
     </extensions>
+
+    <projectListeners>
+        <!-- installs the console header toolbar whenever a console tab (re)opens -->
+        <listener class="community.intelladb.ui.ConsoleFilePresentation"
+                  topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
+    </projectListeners>
 </idea-plugin>

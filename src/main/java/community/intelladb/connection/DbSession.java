@@ -27,6 +27,8 @@ public final class DbSession implements AutoCloseable {
     private Connection connection;
     private volatile SchemaCatalog catalog;
     private volatile String serverVersion = "";
+    /** Statement currently executing, so {@link #cancel()} can interrupt it from another thread. */
+    private volatile Statement running;
 
     public DbSession(@NotNull DbConfig config, @Nullable String password) {
         this.config = config;
@@ -96,6 +98,7 @@ public final class DbSession implements AutoCloseable {
         try {
             ensureOpen();
             try (Statement st = connection.createStatement()) {
+                running = st;
                 boolean hasResultSet = st.execute(sql);
                 long duration = System.currentTimeMillis() - start;
                 if (hasResultSet) {
@@ -111,6 +114,61 @@ public final class DbSession implements AutoCloseable {
         } catch (SQLException e) {
             return SqlResult.error(sql, e.getMessage() == null ? e.toString() : e.getMessage(),
                     System.currentTimeMillis() - start);
+        } finally {
+            running = null;
+        }
+    }
+
+    /**
+     * Asks the server to abort the statement currently running (if any). Deliberately not
+     * synchronized: {@link #execute} holds the monitor for the whole statement.
+     */
+    public void cancel() {
+        Statement statement = running;
+        if (statement != null) {
+            try {
+                statement.cancel();
+            } catch (SQLException ignored) {
+            }
+        }
+    }
+
+    /**
+     * Switches between auto-commit ("Tx: Auto") and manual transactions ("Tx: Manual").
+     * Per JDBC, turning auto-commit back on commits the pending transaction.
+     */
+    public synchronized void setAutoCommit(boolean autoCommit) throws SQLException {
+        ensureOpen();
+        if (connection.getAutoCommit() != autoCommit) {
+            connection.setAutoCommit(autoCommit);
+        }
+    }
+
+    public synchronized @NotNull SqlResult commit() {
+        return endTransaction("commit", true);
+    }
+
+    public synchronized @NotNull SqlResult rollback() {
+        return endTransaction("rollback", false);
+    }
+
+    private @NotNull SqlResult endTransaction(@NotNull String label, boolean commit) {
+        long start = System.currentTimeMillis();
+        try {
+            ensureOpen();
+            if (connection.getAutoCommit()) {
+                return SqlResult.message(label, "Nothing to " + label + " (auto-commit is on)", 0);
+            }
+            if (commit) {
+                connection.commit();
+            } else {
+                connection.rollback();
+            }
+            return SqlResult.message(label, label.substring(0, 1).toUpperCase() + label.substring(1) + " completed",
+                    System.currentTimeMillis() - start);
+        } catch (SQLException e) {
+            return SqlResult.error(label, e.getMessage() == null ? e.toString() : e.getMessage(),
+                    System.currentTimeMillis() - start);
         }
     }
 
@@ -119,8 +177,11 @@ public final class DbSession implements AutoCloseable {
         ResultSetMetaData meta = rs.getMetaData();
         int columnCount = meta.getColumnCount();
         List<String> columns = new ArrayList<>(columnCount);
+        List<String> types = new ArrayList<>(columnCount);
         for (int i = 1; i <= columnCount; i++) {
             columns.add(meta.getColumnLabel(i));
+            String type = meta.getColumnTypeName(i);
+            types.add(type == null ? "" : type);
         }
         List<Object[]> rows = new ArrayList<>();
         boolean truncated = false;
@@ -141,7 +202,7 @@ public final class DbSession implements AutoCloseable {
             }
             rows.add(row);
         }
-        return SqlResult.rows(sql, columns, rows, truncated, duration);
+        return SqlResult.rows(sql, columns, types, rows, truncated, duration);
     }
 
     /** Reloads the schema catalog in the background of the caller's thread. */

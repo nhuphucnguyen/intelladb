@@ -1,6 +1,7 @@
 package community.intelladb.util;
 
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,8 +14,20 @@ public final class SqlSplitter {
      * (whitespace/comment-only) statements are dropped. Comments are preserved inside statements.
      */
     public static @NotNull List<String> split(@NotNull String script) {
-        List<String> statements = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
+        return ranges(script).stream().map(Statement::text).toList();
+    }
+
+    /** One statement of a script: trimmed text plus its [start, end) offsets in the script. */
+    public record Statement(int start, int end, @NotNull String text) {
+        public boolean contains(int offset) {
+            return offset >= start && offset <= end;
+        }
+    }
+
+    /** Like {@link #split} but keeps where each statement sits in the script. */
+    public static @NotNull List<Statement> ranges(@NotNull String script) {
+        List<Statement> statements = new ArrayList<>();
+        int segmentStart = 0;
         int i = 0;
         int n = script.length();
         while (i < n) {
@@ -25,7 +38,6 @@ public final class SqlSplitter {
                 if (end < 0) {
                     end = n;
                 }
-                current.append(script, i, end);
                 i = end;
                 continue;
             }
@@ -33,7 +45,6 @@ public final class SqlSplitter {
             if (c == '/' && i + 1 < n && script.charAt(i + 1) == '*') {
                 int end = script.indexOf("*/", i + 2);
                 end = end < 0 ? n : end + 2;
-                current.append(script, i, end);
                 i = end;
                 continue;
             }
@@ -44,7 +55,6 @@ public final class SqlSplitter {
                     String tag = script.substring(i, close + 1);
                     int bodyEnd = script.indexOf(tag, close + 1);
                     int end = bodyEnd < 0 ? n : bodyEnd + tag.length();
-                    current.append(script, i, end);
                     i = end;
                     continue;
                 }
@@ -64,26 +74,53 @@ public final class SqlSplitter {
                     end++;
                 }
                 end = Math.min(end, n);
-                current.append(script, i, end);
                 i = end;
                 continue;
             }
             if (c == ';') {
-                statements.add(current.toString());
-                current.setLength(0);
+                addTrimmed(statements, script, segmentStart, i);
                 i++;
+                segmentStart = i;
                 continue;
             }
-            current.append(c);
             i++;
         }
-        if (!current.toString().isBlank()) {
-            statements.add(current.toString());
+        addTrimmed(statements, script, segmentStart, n);
+        return statements;
+    }
+
+    private static void addTrimmed(@NotNull List<Statement> out, @NotNull String script, int start, int end) {
+        while (start < end && Character.isWhitespace(script.charAt(start))) {
+            start++;
         }
-        return statements.stream()
-                .map(String::trim)
-                .filter(s -> !s.isBlank())
-                .toList();
+        while (end > start && Character.isWhitespace(script.charAt(end - 1))) {
+            end--;
+        }
+        if (start < end) {
+            out.add(new Statement(start, end, script.substring(start, end)));
+        }
+    }
+
+    /**
+     * The statement to run for a caret at {@code offset} ("Playground" mode): the one
+     * containing it, else the nearest one before it (caret after the ';' or on a blank
+     * line below), else the first one after it.
+     */
+    public static @Nullable Statement at(@NotNull String script, int offset) {
+        List<Statement> all = ranges(script);
+        Statement before = null;
+        for (Statement statement : all) {
+            if (statement.contains(offset)) {
+                return statement;
+            }
+            if (statement.end() <= offset) {
+                before = statement;
+            }
+        }
+        if (before != null) {
+            return before;
+        }
+        return all.isEmpty() ? null : all.get(0);
     }
 
     private static boolean isTagBody(@NotNull String s, int start, int end) {
