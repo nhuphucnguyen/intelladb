@@ -30,13 +30,16 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Content of the "DB Services" tool window, modelled on IntelliJ's Services view: a tree
- * of connections and their consoles on the left, the selected console's results
- * (Output + result tabs) on the right. Double-clicking a console jumps to its editor tab.
+ * Content of the "DB Services" tool window, modelled on IntelliJ's Services view. Left:
+ * the tree of connections and their consoles, with the query history list below it.
+ * Right: the selected console's results (Output + result tabs), or — when a history entry
+ * is selected — that query's SQL and cached result. Double-clicking a console jumps to
+ * its editor tab.
  */
 final class DbServicesPanel extends JPanel implements Disposable {
 
     private static final String EMPTY_CARD = "empty";
+    private static final String HISTORY_CARD = "history";
 
     private final Project project;
     private final ResultsHub hub;
@@ -45,6 +48,7 @@ final class DbServicesPanel extends JPanel implements Disposable {
     private final CardLayout cards = new CardLayout();
     private final JPanel content = new JPanel(cards);
     private final Map<SqlConsole, String> cardIds = new LinkedHashMap<>();
+    private final QueryHistoryView history;
 
     DbServicesPanel(@NotNull Project project) {
         super(new BorderLayout());
@@ -55,7 +59,16 @@ final class DbServicesPanel extends JPanel implements Disposable {
         tree.setShowsRootHandles(true);
         tree.setCellRenderer(new Renderer());
         tree.getEmptyText().setText("Run a console to see it here");
-        tree.addTreeSelectionListener(e -> showSelected());
+        history = new QueryHistoryView(project, () -> {
+            tree.clearSelection();
+            cards.show(content, HISTORY_CARD);
+        });
+        tree.addTreeSelectionListener(e -> {
+            if (selectedConsole() != null) {
+                history.clearSelection(); // one selection drives the right-hand side
+            }
+            showSelected();
+        });
         tree.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(@NotNull MouseEvent e) {
@@ -73,16 +86,22 @@ final class DbServicesPanel extends JPanel implements Disposable {
         hint.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
         empty.add(hint, BorderLayout.CENTER);
         content.add(empty, EMPTY_CARD);
+        content.add(history.detailComponent(), HISTORY_CARD);
 
         JBScrollPane treeScroll = new JBScrollPane(tree);
         treeScroll.setBorder(JBUI.Borders.empty());
-        JBSplitter splitter = new JBSplitter(false, 0.18f);
-        splitter.setFirstComponent(treeScroll);
+        JBSplitter left = new JBSplitter(true, 0.35f);
+        left.setFirstComponent(treeScroll);
+        left.setSecondComponent(history.listComponent());
+        JBSplitter splitter = new JBSplitter(false, 0.22f);
+        splitter.setFirstComponent(left);
         splitter.setSecondComponent(content);
         add(splitter, BorderLayout.CENTER);
 
         hub.addListener(this::rebuild, this);
         hub.setSelector(this::select);
+        hub.setHistoryFocuser(history::focusList);
+        com.intellij.openapi.util.Disposer.register(this, history);
         ConnectionManager.getInstance(project).addListener(() -> {
             if (!project.isDisposed()) {
                 tree.repaint(); // connected dots / renamed connections
@@ -140,7 +159,11 @@ final class DbServicesPanel extends JPanel implements Disposable {
 
     private void showSelected() {
         SqlConsole console = selectedConsole();
-        cards.show(content, console != null && cardIds.containsKey(console) ? cardIds.get(console) : EMPTY_CARD);
+        if (console != null && cardIds.containsKey(console)) {
+            cards.show(content, cardIds.get(console));
+        } else if (history.isEmptySelection()) {
+            cards.show(content, EMPTY_CARD);
+        }
     }
 
     private final class Renderer extends ColoredTreeCellRenderer {
@@ -162,5 +185,6 @@ final class DbServicesPanel extends JPanel implements Disposable {
     @Override
     public void dispose() {
         hub.setSelector(null);
+        hub.setHistoryFocuser(null);
     }
 }

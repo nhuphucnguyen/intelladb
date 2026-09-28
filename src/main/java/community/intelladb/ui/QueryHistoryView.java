@@ -39,6 +39,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.Icon;
+import javax.swing.JComponent;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JSpinner;
@@ -55,13 +56,13 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * "History" tab of DB Services: recently executed queries (newest first) on the left,
- * the selected query's SQL and its cached result on the right. Moving through the list
- * with the arrow keys swaps the result instantly — nothing is re-run — so recent results
- * can be skimmed and compared. The list can be filtered, and N (how many queries are
- * kept) is set right here.
+ * Query history inside the DB Services view: {@link #listComponent()} (recent queries,
+ * newest first, with filter and "keep last N") sits under the connection/console tree;
+ * {@link #detailComponent()} (the selected query's SQL and cached result) is shown on the
+ * right. Moving through the list with the arrow keys swaps the result instantly —
+ * nothing is re-run — so recent results can be skimmed and compared.
  */
-final class QueryHistoryPanel extends JPanel implements Disposable {
+final class QueryHistoryView implements Disposable {
 
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm:ss");
 
@@ -74,11 +75,15 @@ final class QueryHistoryPanel extends JPanel implements Disposable {
     private final Document sqlDocument = EditorFactory.getInstance().createDocument("");
     private final EditorEx sqlViewer;
     private final ResultsPanel results;
+    private final JPanel listSide;
+    private final JPanel detailSide;
+    private final Runnable onSelect;
     private @Nullable QueryHistory.Entry shown;
 
-    QueryHistoryPanel(@NotNull Project project) {
-        super(new BorderLayout());
+    /** @param onSelect called when the user picks an entry (the host shows {@link #detailComponent()}) */
+    QueryHistoryView(@NotNull Project project, @NotNull Runnable onSelect) {
         this.project = project;
+        this.onSelect = onSelect;
         this.history = QueryHistory.getInstance(project);
         this.sqlViewer = (EditorEx) EditorFactory.getInstance().createViewer(sqlDocument, project);
         this.results = new ResultsPanel(project, new ResultsPanel.Host() {
@@ -108,8 +113,10 @@ final class QueryHistoryPanel extends JPanel implements Disposable {
         list.getEmptyText().appendLine("Run a statement in a SQL console — it is kept here with its result",
                 SimpleTextAttributes.GRAYED_ATTRIBUTES, null);
         list.addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting()) {
-                show(list.getSelectedValue());
+            QueryHistory.Entry selected = list.getSelectedValue();
+            if (!e.getValueIsAdjusting() && selected != null) {
+                show(selected);
+                onSelect.run();
             }
         });
         list.addMouseListener(new MouseAdapter() {
@@ -121,7 +128,7 @@ final class QueryHistoryPanel extends JPanel implements Disposable {
             }
         });
         list.registerKeyboardAction(e -> openInConsole(),
-                javax.swing.KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), WHEN_FOCUSED);
+                javax.swing.KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), JComponent.WHEN_FOCUSED);
         search.addDocumentListener(new DocumentAdapter() {
             @Override
             protected void textChanged(@NotNull javax.swing.event.DocumentEvent e) {
@@ -129,21 +136,48 @@ final class QueryHistoryPanel extends JPanel implements Disposable {
             }
         });
 
-        JBSplitter splitter = new JBSplitter(false, 0.34f);
-        splitter.setFirstComponent(buildListSide());
-        splitter.setSecondComponent(buildDetailSide());
-        add(splitter, BorderLayout.CENTER);
-
+        listSide = buildListSide();
+        detailSide = buildDetailSide();
         history.addListener(this::reload, this);
         reload();
+    }
+
+    /** The history list with its filter and settings — placed under the console tree. */
+    @NotNull JComponent listComponent() {
+        return listSide;
+    }
+
+    /** SQL + cached result of the selected entry — placed in the right-hand content area. */
+    @NotNull JComponent detailComponent() {
+        return detailSide;
+    }
+
+    /** Deselects (the host switched to a console); the detail keeps its last content. */
+    void clearSelection() {
+        list.clearSelection();
+    }
+
+    boolean isEmptySelection() {
+        return list.isSelectionEmpty();
+    }
+
+    /** Focuses the list, selecting the newest entry when nothing is selected. */
+    void focusList() {
+        if (list.isSelectionEmpty() && listModel.getSize() > 0) {
+            list.setSelectedIndex(0);
+        }
+        list.requestFocusInWindow();
     }
 
     // ------------------------------------------------------------------ layout
 
     private @NotNull JPanel buildListSide() {
-        JPanel top = new JPanel(new BorderLayout());
-        top.setBorder(JBUI.Borders.empty(4));
+        JBLabel title = new JBLabel("Query History");
+        title.setBorder(JBUI.Borders.empty(0, 2, 4, 0));
         search.getTextEditor().getEmptyText().setText("Filter by SQL or connection");
+        JPanel top = new JPanel(new BorderLayout());
+        top.setBorder(JBUI.Borders.empty(6, 4, 4, 4));
+        top.add(title, BorderLayout.NORTH);
         top.add(search, BorderLayout.CENTER);
 
         SpinnerNumberModel limitModel = new SpinnerNumberModel(history.limit(),
@@ -154,14 +188,36 @@ final class QueryHistoryPanel extends JPanel implements Disposable {
             QueryHistory.setConfiguredLimit(((Number) limit.getValue()).intValue());
             history.limitChanged();
         });
-        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.LEFT, JBUI.scale(6), JBUI.scale(2)));
-        bottom.add(new JBLabel("Keep last"));
-        bottom.add(limit);
-        bottom.add(new JBLabel("queries"));
-        javax.swing.JButton clear = new javax.swing.JButton("Clear");
-        clear.addActionListener(e -> history.clear());
-        bottom.add(clear);
-        bottom.setBorder(JBUI.Borders.customLineTop(JBColor.border()));
+        JPanel keep = new JPanel(new FlowLayout(FlowLayout.LEFT, JBUI.scale(4), 0));
+        keep.add(new JBLabel("Keep last"));
+        keep.add(limit);
+
+        DefaultActionGroup clearGroup = new DefaultActionGroup();
+        clearGroup.add(new DumbAwareAction("Clear History", "Forget all recorded queries and results",
+                AllIcons.Actions.GC) {
+            @Override
+            public void actionPerformed(@NotNull AnActionEvent e) {
+                history.clear();
+            }
+
+            @Override
+            public void update(@NotNull AnActionEvent e) {
+                e.getPresentation().setEnabled(listModel.getSize() > 0);
+            }
+
+            @Override
+            public @NotNull ActionUpdateThread getActionUpdateThread() {
+                return ActionUpdateThread.EDT;
+            }
+        });
+        ActionToolbar clearBar = ActionManager.getInstance().createActionToolbar("IntellaDbHistoryList", clearGroup, true);
+        clearBar.setTargetComponent(list);
+
+        JPanel bottom = new JPanel(new BorderLayout());
+        bottom.add(keep, BorderLayout.CENTER);
+        bottom.add(clearBar.getComponent(), BorderLayout.EAST);
+        bottom.setBorder(JBUI.Borders.compound(JBUI.Borders.customLineTop(JBColor.border()),
+                JBUI.Borders.empty(2, 2)));
 
         JBScrollPane scroll = new JBScrollPane(list);
         scroll.setBorder(JBUI.Borders.customLineTop(JBColor.border()));
@@ -210,7 +266,7 @@ final class QueryHistoryPanel extends JPanel implements Disposable {
             }
         });
         ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar("IntellaDbHistory", actions, true);
-        toolbar.setTargetComponent(this);
+        toolbar.setTargetComponent(sqlViewer.getContentComponent());
 
         summary.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
         summary.setBorder(JBUI.Borders.emptyLeft(8));
@@ -228,6 +284,7 @@ final class QueryHistoryPanel extends JPanel implements Disposable {
         detail.setSecondComponent(results);
         JPanel side = new JPanel(new BorderLayout());
         side.add(detail, BorderLayout.CENTER);
+        results.showMessage("Select a query in the history to see its result");
         return side;
     }
 
@@ -254,17 +311,14 @@ final class QueryHistoryPanel extends JPanel implements Disposable {
                         || e.sql().toLowerCase(Locale.ROOT).contains(filter)
                         || e.connectionName().toLowerCase(Locale.ROOT).contains(filter))
                 .toList();
+        // Keeps the entry being viewed selected; never auto-selects, so a new query
+        // arriving does not take the right-hand side away from the console's results.
         QueryHistory.Entry selected = list.getSelectedValue();
         listModel.replaceAll(entries);
         int index = selected == null ? -1 : indexOf(entries, selected.id());
-        if (index < 0 && !entries.isEmpty()) {
-            index = 0;
-        }
         if (index >= 0) {
             list.setSelectedIndex(index);
             list.ensureIndexIsVisible(index);
-        } else {
-            show(null);
         }
     }
 
@@ -331,10 +385,10 @@ final class QueryHistoryPanel extends JPanel implements Disposable {
             append(entry.executedAt().format(TIME) + "  ", SimpleTextAttributes.GRAYED_ATTRIBUTES);
             String oneLine = entry.sql().replaceAll("\\s+", " ");
             append(StringUtil.shortenTextWithEllipsis(oneLine, 140, 0), SimpleTextAttributes.REGULAR_ATTRIBUTES);
-            append("   " + outcome(entry.result()) + "  @" + entry.connectionName(),
+            append("  " + outcome(entry.result()),
                     entry.result().kind == SqlResult.Kind.ERROR
                             ? SimpleTextAttributes.ERROR_ATTRIBUTES : SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES);
-            setToolTipText(entry.sql());
+            setToolTipText("@" + entry.connectionName() + " · " + entry.executedAt().format(TIME) + "\n" + entry.sql());
         }
 
         private static @NotNull Icon iconOf(@NotNull SqlResult result) {
