@@ -13,7 +13,6 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.fileTypes.FileType;
-import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.ui.EditorTextField;
@@ -109,8 +108,11 @@ public final class ConsolePanel extends JPanel {
     }
 
     private static @NotNull FileType sqlFileType() {
-        FileType sql = FileTypeManager.getInstance().findFileTypeByName("SQL");
-        return sql != null ? sql : community.intelladb.sql.IntellaSqlFileType.INSTANCE;
+        // Deliberately our own file type: the platform SQL highlighter resolves some
+        // attribute keys from the light scheme inside an embedded EditorTextField,
+        // which rendered keywords near-invisible in dark themes. Our highlighter uses
+        // DefaultLanguageHighlighterColors, which follow the active theme.
+        return community.intelladb.sql.IntellaSqlFileType.INSTANCE;
     }
 
     private javax.swing.JComponent toolbar() {

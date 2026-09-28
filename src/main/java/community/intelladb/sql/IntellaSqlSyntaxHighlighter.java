@@ -1,33 +1,55 @@
 package community.intelladb.sql;
 
 import com.intellij.lexer.Lexer;
-import com.intellij.openapi.editor.DefaultLanguageHighlighterColors;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.openapi.fileTypes.SyntaxHighlighterBase;
 import com.intellij.psi.tree.IElementType;
+import com.intellij.ui.JBColor;
 import org.jetbrains.annotations.NotNull;
 
-/** Maps IntellaSQL token types to the standard editor color scheme keys. */
+import java.awt.Color;
+import java.awt.Font;
+
+/**
+ * Maps IntellaSQL token types to fixed, theme-brightness-aware colors. Embedded
+ * EditorTextFields resolve scheme-based attribute keys inconsistently (light-scheme
+ * keywords could land on dark backgrounds); fixed attributes cannot misresolve.
+ */
 public final class IntellaSqlSyntaxHighlighter extends SyntaxHighlighterBase {
 
     private static final TextAttributesKey[] EMPTY = new TextAttributesKey[0];
 
-    public static final TextAttributesKey SQL_KEYWORD = TextAttributesKey.createTextAttributesKey(
-            "INTellaDB_SQL_KEYWORD", DefaultLanguageHighlighterColors.KEYWORD);
-    public static final TextAttributesKey SQL_STRING = TextAttributesKey.createTextAttributesKey(
-            "INTellaDB_SQL_STRING", DefaultLanguageHighlighterColors.STRING);
-    public static final TextAttributesKey SQL_NUMBER = TextAttributesKey.createTextAttributesKey(
-            "INTellaDB_SQL_NUMBER", DefaultLanguageHighlighterColors.NUMBER);
-    public static final TextAttributesKey SQL_COMMENT = TextAttributesKey.createTextAttributesKey(
-            "INTellaDB_SQL_COMMENT", DefaultLanguageHighlighterColors.LINE_COMMENT);
-    public static final TextAttributesKey SQL_BLOCK_COMMENT = TextAttributesKey.createTextAttributesKey(
-            "INTellaDB_SQL_BLOCK_COMMENT", DefaultLanguageHighlighterColors.BLOCK_COMMENT);
-    public static final TextAttributesKey SQL_PAREN = TextAttributesKey.createTextAttributesKey(
-            "INTellaDB_SQL_PAREN", DefaultLanguageHighlighterColors.PARENTHESES);
-    public static final TextAttributesKey SQL_COMMA = TextAttributesKey.createTextAttributesKey(
-            "INTellaDB_SQL_COMMA", DefaultLanguageHighlighterColors.COMMA);
-    public static final TextAttributesKey SQL_OPERATOR = TextAttributesKey.createTextAttributesKey(
-            "INTellaDB_SQL_OPERATOR", DefaultLanguageHighlighterColors.OPERATION_SIGN);
+    private static final boolean BRIGHT = JBColor.isBright();
+
+    private static final TextAttributesKey SQL_KEYWORD = key("INTellaDB_SQL_KEYWORD",
+            BRIGHT ? new Color(0x0033B3) : new Color(0xCF8E6D));
+    private static final TextAttributesKey SQL_STRING = key("INTellaDB_SQL_STRING",
+            BRIGHT ? new Color(0x067D17) : new Color(0x6AAB73));
+    private static final TextAttributesKey SQL_NUMBER = key("INTellaDB_SQL_NUMBER",
+            BRIGHT ? new Color(0x1750EB) : new Color(0x2AACB8));
+    private static final TextAttributesKey SQL_COMMENT = key("INTellaDB_SQL_COMMENT",
+            BRIGHT ? new Color(0x8C8C8C) : new Color(0x7A7A7B));
+    private static final TextAttributesKey SQL_BLOCK_COMMENT = key("INTellaDB_SQL_BLOCK_COMMENT",
+            BRIGHT ? new Color(0x8C8C8C) : new Color(0x7A7A7B));
+    private static final TextAttributesKey SQL_PAREN = key("INTellaDB_SQL_PAREN",
+            BRIGHT ? new Color(0x000000) : new Color(0xBCBEC4));
+    private static final TextAttributesKey SQL_COMMA = key("INTellaDB_SQL_COMMA",
+            BRIGHT ? new Color(0x000000) : new Color(0xBCBEC4));
+    private static final TextAttributesKey SQL_OPERATOR = key("INTellaDB_SQL_OPERATOR",
+            BRIGHT ? new Color(0x000000) : new Color(0xBCBEC4));
+
+    private IntellaSqlSyntaxHighlighter() {
+    }
+
+    /**
+     * The deprecated fixed-attributes variant is deliberate: no theme defines these keys,
+     * so the fallback attributes always apply and the colors are deterministic.
+     */
+    @SuppressWarnings("deprecation")
+    private static TextAttributesKey key(@NotNull String name, @NotNull Color foreground) {
+        return TextAttributesKey.createTextAttributesKey(name,
+                new com.intellij.openapi.editor.markup.TextAttributes(foreground, null, null, null, Font.PLAIN));
+    }
 
     @Override
     public @NotNull Lexer getHighlightingLexer() {

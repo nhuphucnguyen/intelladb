@@ -31,6 +31,11 @@
   Insert into Console / Copy buttons.
 
 ### Fixed
+- **Console SQL text was nearly invisible in dark themes** (dark-blue keywords on a
+  dark background): the embedded editor resolved the platform SQL highlighter's
+  attribute keys from the light default scheme. The console now uses the plugin's own
+  SQL highlighter with fixed, theme-brightness-aware colors (keywords orange, strings
+  green, comments gray in dark themes), so text is always readable.
 - **Tabs in the DB Explorer could not be closed** — the close action existed but nothing
   was wired to it. Console and data-preview tabs now have a × button in their header,
   and middle-clicking a tab closes it (like editor tabs). Each tab header is drawn as a
