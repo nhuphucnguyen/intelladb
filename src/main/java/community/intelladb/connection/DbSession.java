@@ -202,7 +202,41 @@ public final class DbSession implements AutoCloseable {
             }
             rows.add(row);
         }
-        return SqlResult.rows(sql, columns, types, rows, truncated, duration);
+        String[] source = singleSourceTable(meta, columnCount);
+        return SqlResult.rows(sql, columns, types, rows, truncated, duration, source[0], source[1]);
+    }
+
+    /**
+     * {schema, table} when every column maps to the same base table (pgjdbc reports the
+     * origin of plain column references), else {null, null}.
+     */
+    private static @NotNull String[] singleSourceTable(@NotNull ResultSetMetaData meta, int columnCount) {
+        String[] none = {null, null};
+        try {
+            if (columnCount == 0 || !meta.isWrapperFor(org.postgresql.PGResultSetMetaData.class)) {
+                return none;
+            }
+            var pg = meta.unwrap(org.postgresql.PGResultSetMetaData.class);
+            String schema = null;
+            String table = null;
+            for (int i = 1; i <= columnCount; i++) {
+                String columnTable = pg.getBaseTableName(i);
+                String columnSchema = pg.getBaseSchemaName(i);
+                if (columnTable == null || columnTable.isEmpty()) {
+                    return none; // computed column
+                }
+                if (table == null) {
+                    table = columnTable;
+                    schema = columnSchema == null || columnSchema.isEmpty() ? null : columnSchema;
+                } else if (!table.equals(columnTable) || !java.util.Objects.equals(schema,
+                        columnSchema == null || columnSchema.isEmpty() ? null : columnSchema)) {
+                    return none; // join
+                }
+            }
+            return new String[]{schema, table};
+        } catch (SQLException e) {
+            return none;
+        }
     }
 
     /** Reloads the schema catalog in the background of the caller's thread. */

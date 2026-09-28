@@ -2,8 +2,6 @@ package community.intelladb.ui;
 
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.util.PropertiesComponent;
-import com.intellij.notification.NotificationGroupManager;
-import com.intellij.notification.NotificationType;
 import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.ActionToolbar;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
@@ -11,17 +9,20 @@ import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.actionSystem.ex.ComboBoxAction;
-import com.intellij.openapi.fileChooser.FileChooserFactory;
-import com.intellij.openapi.fileChooser.FileSaverDescriptor;
 import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.DumbAwareToggleAction;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.vfs.VirtualFileWrapper;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.util.ui.JBUI;
+import community.intelladb.connection.ConnectionManager;
+import community.intelladb.connection.DbConfig;
+import community.intelladb.connection.DbSession;
 import community.intelladb.connection.SqlResult;
+import community.intelladb.schema.DdlGenerator;
+import community.intelladb.schema.SchemaCatalog;
+import community.intelladb.schema.TableMeta;
 import community.intelladb.util.ResultExporter;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -31,15 +32,13 @@ import javax.swing.JPanel;
 import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
 import java.awt.datatransfer.StringSelection;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.util.List;
 
 /**
  * A result set view: {@link ResultGrid} plus, when a {@link Host} is given, the results
  * toolbar of IntelliJ's database tools — rerun, cancel, pin, a data-extractor selector
- * (CSV / TSV / JSON / SQL Inserts / Markdown) with copy-to-clipboard and export-to-file,
- * and the row count / timing. Without a host it is the compact grid used inline by the
+ * (CSV / TSV / JSON / SQL Inserts / Markdown) with quick copy-to-clipboard, the Export
+ * Data dialog, and the row count / timing. Without a host it is the compact grid used inline by the
  * AI chat.
  */
 public final class ResultsPanel extends JPanel {
@@ -49,9 +48,14 @@ public final class ResultsPanel extends JPanel {
         void rerun(@NotNull ResultsPanel panel);
 
         void cancel();
+
+        /** Connection the rows come from — names the export source and finds its DDL. */
+        default @Nullable DbConfig config() {
+            return null;
+        }
     }
 
-    private static final String EXTRACTOR_KEY = "intelladb.results.extractor";
+    private static final String EXTRACTOR_KEY = ExportDataDialog.EXTRACTOR_KEY;
 
     private final Project project;
     private final @Nullable Host host;
@@ -226,11 +230,11 @@ public final class ResultsPanel extends JPanel {
                 return ActionUpdateThread.EDT;
             }
         });
-        right.add(new DumbAwareAction("Export to File…", "Save all rows in the selected format",
+        right.add(new DumbAwareAction("Export Data…", "Export all rows to a file or the clipboard",
                 AllIcons.ToolbarDecorator.Export) {
             @Override
             public void actionPerformed(@NotNull AnActionEvent e) {
-                exportToFile();
+                openExportDialog();
             }
 
             @Override
@@ -279,34 +283,52 @@ public final class ResultsPanel extends JPanel {
         if (!hasRows()) {
             return null;
         }
-        return ResultExporter.export(selectedFormat(), result.columns, result.rows, sourceTable);
+        return ResultExporter.export(selectedFormat(), result.columns, result.rows, insertTarget());
     }
 
-    private void exportToFile() {
-        String text = exportText();
-        if (text == null) {
-            return;
-        }
-        ResultExporter.Format format = selectedFormat();
-        String baseName = sourceTable != null ? sourceTable.replaceAll("[^\\w.-]", "_") : "result";
-        VirtualFileWrapper target = FileChooserFactory.getInstance()
-                .createSaveFileDialog(new FileSaverDescriptor("Export Data", "Save rows as " + format.label,
-                        format.extension), project)
-                .save(baseName + "." + format.extension);
-        if (target == null) {
-            return;
-        }
-        try {
-            Files.writeString(target.getFile().toPath(), text, StandardCharsets.UTF_8);
-            notify(result.rows.size() + " row(s) exported to " + target.getFile().getName(), NotificationType.INFORMATION);
-        } catch (IOException e) {
-            notify("Export failed: " + e.getMessage(), NotificationType.ERROR);
-        }
+    /** Table for SQL Inserts: from the driver's column metadata, else what the opener told us. */
+    private @Nullable String insertTarget() {
+        String fromResult = result == null ? null : result.qualifiedSource();
+        return fromResult != null ? fromResult : sourceTable;
     }
 
-    private void notify(@NotNull String message, @NotNull NotificationType type) {
-        NotificationGroupManager.getInstance().getNotificationGroup("IntellaDB")
-                .createNotification(message, type).notify(project);
+    private void openExportDialog() {
+        if (!hasRows()) {
+            return;
+        }
+        DbConfig config = host == null ? null : host.config();
+        String target = insertTarget();
+        String source;
+        if (target != null) {
+            source = config != null && !config.database.isBlank() ? config.database + "." + target : target;
+        } else {
+            source = result.sql.strip().replaceAll("\\s+", " ");
+        }
+        new ExportDataDialog(project, result, source, target, ddlFor(config)).show();
+    }
+
+    /** CREATE TABLE for the result's source table, when the connection's catalog knows it. */
+    private @Nullable String ddlFor(@Nullable DbConfig config) {
+        if (config == null || result == null || result.sourceTable == null) {
+            return null;
+        }
+        DbSession session = ConnectionManager.getInstance(project).session(config.id);
+        SchemaCatalog catalog = session == null ? null : session.catalog();
+        if (catalog == null) {
+            return null;
+        }
+        for (SchemaCatalog.Schema schema : catalog.schemas()) {
+            if (result.sourceSchema != null && !schema.name().equals(result.sourceSchema)) {
+                continue;
+            }
+            for (TableMeta table : schema.tables()) {
+                if (table.name.equals(result.sourceTable)) {
+                    return DdlGenerator.generate(new SchemaCatalog(List.of(
+                            new SchemaCatalog.Schema(schema.name(), List.of(table)))));
+                }
+            }
+        }
+        return null;
     }
 
     /** "CSV ▾" — picks the data extractor used by Copy and Export (remembered across sessions). */

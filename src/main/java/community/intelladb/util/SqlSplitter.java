@@ -89,6 +89,26 @@ public final class SqlSplitter {
         return statements;
     }
 
+    /** The statement without the whitespace and comments before its first token. */
+    public static @NotNull String stripLeadingComments(@NotNull String sql) {
+        int i = 0;
+        int n = sql.length();
+        while (i < n) {
+            if (Character.isWhitespace(sql.charAt(i))) {
+                i++;
+            } else if (sql.startsWith("--", i)) {
+                int end = sql.indexOf('\n', i);
+                i = end < 0 ? n : end + 1;
+            } else if (sql.startsWith("/*", i)) {
+                int end = sql.indexOf("*/", i + 2);
+                i = end < 0 ? n : end + 2;
+            } else {
+                break;
+            }
+        }
+        return sql.substring(i);
+    }
+
     private static void addTrimmed(@NotNull List<Statement> out, @NotNull String script, int start, int end) {
         while (start < end && Character.isWhitespace(script.charAt(start))) {
             start++;

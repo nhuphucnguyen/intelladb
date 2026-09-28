@@ -295,7 +295,8 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
                     if (into != null) {
                         into.showResult(result);
                     } else if (result.kind == SqlResult.Kind.ROWS) {
-                        String table = sourceTable(statement.text());
+                        String fromDriver = result.qualifiedSource();
+                        String table = fromDriver != null ? fromDriver : sourceTable(statement.text());
                         ResultsPanel panel = view.addResult(result,
                                 table != null ? table : "Result " + index, this);
                         panel.setSourceTable(table);
@@ -328,9 +329,12 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         appliedSchema = target;
     }
 
-    /** {@code schema.table} for a simple SELECT … FROM t, else null (tab gets "Result n"). */
+    /**
+     * Fallback when the driver cannot name one source table (e.g. a computed column):
+     * {@code schema.table} for a simple SELECT … FROM t, else null (tab gets "Result n").
+     */
     private @Nullable String sourceTable(@NotNull String sql) {
-        Matcher m = FROM_TABLE.matcher(sql);
+        Matcher m = FROM_TABLE.matcher(SqlSplitter.stripLeadingComments(sql));
         if (!m.find()) {
             return null;
         }

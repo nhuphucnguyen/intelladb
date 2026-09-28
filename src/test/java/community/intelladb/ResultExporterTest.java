@@ -53,4 +53,28 @@ class ResultExporterTest {
                 ResultExporter.export(Format.MARKDOWN, COLUMNS,
                         List.<Object[]>of(new Object[]{1, "a|b", "x\ny"}), null));
     }
+
+    @Test
+    void transposeWritesOneLinePerColumn() {
+        ResultExporter.Options transpose = new ResultExporter.Options(true, null);
+        assertEquals("id,1,2\nName,Ann,O'Brien\n",
+                ResultExporter.export(Format.CSV, List.of("id", "Name"),
+                        List.<Object[]>of(new Object[]{1, "Ann"}, new Object[]{2, "O'Brien"}), null, transpose));
+        assertEquals("| column | 1 |\n| --- | --- |\n| id | 1 |\n",
+                ResultExporter.export(Format.MARKDOWN, List.of("id"), List.<Object[]>of(new Object[]{1}), null, transpose));
+    }
+
+    @Test
+    void transposeIsIgnoredForRowOrientedFormats() {
+        ResultExporter.Options transpose = new ResultExporter.Options(true, null);
+        assertEquals("INSERT INTO t (id) VALUES (1);\n",
+                ResultExporter.export(Format.SQL_INSERTS, List.of("id"), List.<Object[]>of(new Object[]{1}), "t", transpose));
+    }
+
+    @Test
+    void ddlIsWrittenBeforeInserts() {
+        ResultExporter.Options ddl = new ResultExporter.Options(false, "CREATE TABLE t (\n    id int4\n)\n");
+        assertEquals("CREATE TABLE t (\n    id int4\n);\n\nINSERT INTO t (id) VALUES (1);\n",
+                ResultExporter.export(Format.SQL_INSERTS, List.of("id"), List.<Object[]>of(new Object[]{1}), "t", ddl));
+    }
 }

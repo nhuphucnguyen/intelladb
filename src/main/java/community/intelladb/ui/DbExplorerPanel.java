@@ -221,6 +221,11 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
             }
 
             @Override
+            public @NotNull DbConfig config() {
+                return table.config();
+            }
+
+            @Override
             public void cancel() {
                 DbSession session = sessionOf(table.config());
                 if (session != null) {

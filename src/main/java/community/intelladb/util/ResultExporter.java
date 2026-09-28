@@ -4,6 +4,7 @@ import community.intelladb.schema.IdentifierQuoting;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -29,23 +30,71 @@ public final class ResultExporter {
     }
 
     /**
+     * Extra choices of the Export Data dialog.
+     *
+     * @param transpose one line per column instead of per row (CSV / TSV / Markdown)
+     * @param ddl       table definition written before the INSERTs (SQL Inserts); null for none
+     */
+    public record Options(boolean transpose, @Nullable String ddl) {
+        public static final Options DEFAULT = new Options(false, null);
+    }
+
+    public static boolean supportsTranspose(@NotNull Format format) {
+        return format == Format.CSV || format == Format.TSV || format == Format.MARKDOWN;
+    }
+
+    public static @NotNull String export(@NotNull Format format, @NotNull List<String> columns,
+                                         @NotNull List<Object[]> rows, @Nullable String table) {
+        return export(format, columns, rows, table, Options.DEFAULT);
+    }
+
+    /**
      * @param table target table for {@link Format#SQL_INSERTS}; a placeholder name is used
      *              when the result does not come from a single known table
      */
     public static @NotNull String export(@NotNull Format format, @NotNull List<String> columns,
-                                         @NotNull List<Object[]> rows, @Nullable String table) {
+                                         @NotNull List<Object[]> rows, @Nullable String table,
+                                         @NotNull Options options) {
+        if (options.transpose() && supportsTranspose(format)) {
+            List<Object[]> transposed = new ArrayList<>(columns.size());
+            for (int c = 0; c < columns.size(); c++) {
+                Object[] line = new Object[rows.size() + 1];
+                line[0] = columns.get(c);
+                for (int r = 0; r < rows.size(); r++) {
+                    Object[] row = rows.get(r);
+                    line[r + 1] = c < row.length ? row[c] : null;
+                }
+                transposed.add(line);
+            }
+            List<String> header = new ArrayList<>(rows.size() + 1);
+            header.add("column");
+            for (int r = 1; r <= rows.size(); r++) {
+                header.add(String.valueOf(r));
+            }
+            return format == Format.MARKDOWN
+                    ? markdown(header, transposed)
+                    : delimited(null, transposed, format == Format.CSV ? ',' : '\t');
+        }
         return switch (format) {
             case CSV -> delimited(columns, rows, ',');
             case TSV -> delimited(columns, rows, '\t');
             case JSON -> json(columns, rows);
-            case SQL_INSERTS -> inserts(columns, rows, table == null || table.isBlank() ? "my_table" : table);
+            case SQL_INSERTS -> {
+                String inserts = inserts(columns, rows, table == null || table.isBlank() ? "my_table" : table);
+                String ddl = options.ddl();
+                yield ddl == null || ddl.isBlank() ? inserts : ddl.strip() + (ddl.strip().endsWith(";") ? "" : ";")
+                        + "\n\n" + inserts;
+            }
             case MARKDOWN -> markdown(columns, rows);
         };
     }
 
-    private static @NotNull String delimited(@NotNull List<String> columns, @NotNull List<Object[]> rows, char sep) {
+    /** @param columns header row, or null for none (transposed output) */
+    private static @NotNull String delimited(@Nullable List<String> columns, @NotNull List<Object[]> rows, char sep) {
         StringBuilder out = new StringBuilder();
-        appendDelimitedRow(out, columns.toArray(), sep);
+        if (columns != null) {
+            appendDelimitedRow(out, columns.toArray(), sep);
+        }
         for (Object[] row : rows) {
             appendDelimitedRow(out, row, sep);
         }

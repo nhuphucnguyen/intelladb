@@ -85,4 +85,11 @@ class SqlSplitterTest {
         assertEquals("SELECT 1", SqlSplitter.at("\n\nSELECT 1", 0).text()); // above the first
         assertEquals(null, SqlSplitter.at("  ", 1));
     }
+
+    @Test
+    void stripsLeadingCommentsOnly() {
+        assertEquals("select * from t -- tail",
+                SqlSplitter.stripLeadingComments("-- SQL for localhost\n /* note */\n  select * from t -- tail"));
+        assertEquals("", SqlSplitter.stripLeadingComments("-- only a comment"));
+    }
 }
