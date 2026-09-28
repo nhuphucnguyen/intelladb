@@ -22,7 +22,7 @@ IntelliJ Platform SDK — plus an AI layer that no stock edition offers in this 
 | Table data | Double-click any table for a first-200-rows preview grid |
 | Liquibase support | SQL syntax highlighting injected into `<sql>` blocks of XML changelogs (root `<databaseChangeLog>` or a `liquibase` path segment); falls back to the plugin's own lightweight SQL highlighter when no SQL language is installed |
 | Column ↔ value aid | In long INSERTs: caret on a column highlights the matching value in every VALUES tuple (and vice versa), plus inline gray column-name hints before each value. Works in .sql files, Liquibase XML and the SQL console |
-| AI assistant | A conversation, not a form: type and hit **Enter** (Shift+Enter = newline); questions, answers, SQL blocks and **inline result tables** all live in one transcript; Run renders the query result right under the answer (or Insert into Console / Copy); live schema DDL in the prompt; per-connection history |
+| AI assistant (own tool window) | A conversation, not a form: type and hit **Enter** (Shift+Enter = newline); questions, answers, SQL blocks and **inline result tables** all live in one transcript; Run renders the query result right under the answer (or Insert into Console / Copy); live schema DDL in the prompt; per-connection history; a connection switcher at the top — browse saved connections from the DB Explorer tree or switch directly inside the chat; both tool windows work side by side |
 | Provider-agnostic AI | Any OpenAI-compatible endpoint: **Z.ai GLM (coding plan or standard API)**, Zhipu BigModel, OpenAI, DeepSeek, OpenRouter, Ollama (local), LM Studio (local), or a custom base URL. API key stored in the IDE secure credential store. |
 
 ## AI provider setup

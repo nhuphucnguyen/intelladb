@@ -82,6 +82,25 @@ public final class ConnectionTreePanel implements Disposable {
         tree.getEmptyText().setText("No connections yet — click + to add one");
         tree.addMouseListener(new MouseHandler());
 
+        community.intelladb.connection.SessionOpener.getInstance(project)
+                .addListener(new community.intelladb.connection.SessionOpener.Listener() {
+                    @Override
+                    public void connecting(@NotNull DbConfig config) {
+                        onConnecting(config);
+                    }
+
+                    @Override
+                    public void connected(@NotNull DbConfig config,
+                                          @NotNull community.intelladb.connection.DbSession session) {
+                        onConnected(config);
+                    }
+
+                    @Override
+                    public void failed(@NotNull DbConfig config, @NotNull String message) {
+                        onFailed(config, message);
+                    }
+                });
+
         fill();
         wrapper.add(tree, BorderLayout.CENTER);
         wrapper.add(hint, BorderLayout.SOUTH);
@@ -230,16 +249,18 @@ public final class ConnectionTreePanel implements Disposable {
 
     // ------------------------------------------------------------------ state
 
-    public void setConnecting(@NotNull DbConfig config, boolean connecting) {
-        if (connecting) {
-            transientState.put(config.id, "connecting");
-        } else {
-            transientState.remove(config.id);
-        }
+    /** Connect lifecycle arrives via {@link community.intelladb.connection.SessionOpener}. */
+    private void onConnecting(@NotNull DbConfig config) {
+        transientState.put(config.id, "connecting");
         rebuildOnEdt();
     }
 
-    public void setError(@NotNull DbConfig config, @NotNull String message) {
+    private void onConnected(@NotNull DbConfig config) {
+        transientState.remove(config.id);
+        rebuildOnEdt();
+    }
+
+    private void onFailed(@NotNull DbConfig config, @NotNull String message) {
         transientState.put(config.id, "error:" + message);
         rebuildOnEdt();
     }
@@ -316,7 +337,7 @@ public final class ConnectionTreePanel implements Disposable {
                 });
             } catch (Exception ex) {
                 ApplicationManager.getApplication().invokeLater(() ->
-                        setError(config, ex.getMessage() == null ? ex.toString() : ex.getMessage()));
+                        onFailed(config, ex.getMessage() == null ? ex.toString() : ex.getMessage()));
             }
         });
     }
@@ -411,14 +432,9 @@ public final class ConnectionTreePanel implements Disposable {
                     com.intellij.icons.AllIcons.Actions.Copy, () -> copyDdl(new SchemaCatalog(List.of(
                             new SchemaCatalog.Schema(tableEntry.schema(), List.of(tableEntry.meta())))), "Table")));
             group.add(action("Ask AI about this table", "Explain this table with the AI assistant",
-                    IntellaDbIcons.AI, () -> {
-                        explorer.openAiAssistant();
-                        AiChatPanel ai = explorer.aiPanel();
-                        if (ai != null) {
-                            ai.setDraft("Explain the table " + tableEntry.schema() + "."
-                                    + tableEntry.meta().name + " and how it relates to other tables.");
-                        }
-                    }));
+                    IntellaDbIcons.AI, () -> AiChatPanel.openWithDraft(project,
+                            "Explain the table " + tableEntry.schema() + "."
+                                    + tableEntry.meta().name + " and how it relates to other tables.")));
         } else if (entry instanceof ColumnEntry columnEntry) {
             group.add(action("Copy Name", "Copy column name", com.intellij.icons.AllIcons.Actions.Copy,
                     () -> CopyPasteManager.getInstance().setContents(new StringSelection(columnEntry.name()))));

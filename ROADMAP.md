@@ -19,6 +19,8 @@ Built milestone by milestone, same discipline as the sibling
 | M11 | Data editing in the grid (inline edit, INSERT/UPDATE generation), CSV export | planned |
 | M12 | AI: streaming responses, "explain this error", index advice, per-table context menus | planned |
 | M13 | Query history, bookmarks, schema compare | planned |
+| M9c | Conversation-style chat with inline results (replaced separate AI—Result tab) | ✅ |
+| M9e | AI Assistant split into its own tool window with a connection switcher; shared SessionOpener for Explorer + chat | ✅ |
 
 ## Verification record (M8)
 

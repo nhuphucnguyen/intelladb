@@ -18,6 +18,9 @@
         <toolWindow id="DB Explorer" anchor="right" canCloseContents="false"
                     factoryClass="community.intelladb.ui.DbToolWindowFactory"/>
 
+        <toolWindow id="AI Assistant" anchor="right" canCloseContents="false"
+                    factoryClass="community.intelladb.ui.AiAssistantToolWindowFactory"/>
+
         <applicationService serviceImplementation="community.intelladb.ai.AiSettings"/>
 
         <applicationConfigurable parentId="tools"

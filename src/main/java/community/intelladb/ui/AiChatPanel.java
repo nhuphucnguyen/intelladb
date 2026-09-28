@@ -1,9 +1,13 @@
 package community.intelladb.ui;
 
 import com.intellij.icons.AllIcons;
-import com.intellij.openapi.ide.CopyPasteManager;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.wm.ToolWindowManager;
+import com.intellij.ui.SimpleListCellRenderer;
+import com.intellij.openapi.ui.ComboBox;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ui.JBUI;
@@ -15,6 +19,7 @@ import community.intelladb.ai.ChatMessage;
 import community.intelladb.ai.OpenAiCompatibleClient;
 import community.intelladb.connection.DbConfig;
 import community.intelladb.connection.DbSession;
+import community.intelladb.connection.SessionOpener;
 import community.intelladb.connection.SqlResult;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -22,7 +27,6 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComponent;
-import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JScrollBar;
@@ -45,47 +49,119 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Conversation-style chat panel. Questions, answers, and — when the user clicks Run —
- * the query results all live in one scrolling transcript. Enter sends, Shift+Enter
- * inserts a newline.
+ * Conversation-style AI chat in its own tool window. Questions, answers, SQL blocks and —
+ * via Run — the query results all live in one scrolling transcript. A connection switcher
+ * at the top picks which saved connection the chat talks to, so the DB Explorer tree and
+ * this chat can be used independently. Enter sends, Shift+Enter inserts a newline.
  */
-public final class AiChatPanel extends JPanel {
+public final class AiChatPanel extends JPanel implements Disposable {
 
+    private static final String TOOL_WINDOW_ID = AiAssistantToolWindowFactory.ID;
     private static final int BUBBLE_TEXT_WIDTH = 460;
     private static final int INLINE_RESULT_HEIGHT = 190;
 
     private final Project project;
-    private final DbExplorerPanel explorer;
+    private final SessionOpener opener;
     private final JPanel transcript = new JPanel(new GridBagLayout());
     private final JBScrollPane scrollPane;
     private final JTextArea input = new JTextArea(2, 36);
     private final JButton sendButton = new JButton("Send");
     private final JBLabel contextLabel = new JBLabel(" ");
+    private final ComboBox<DbConfig> connectionCombo = new ComboBox<>();
     private final Map<String, List<ChatMessage>> historyByConfig = new HashMap<>();
+    private boolean updatingCombo;
+    private boolean disposed;
 
-    @Nullable
-    private DbConfig config;
     @Nullable
     private CompletableFuture<?> pending;
     @Nullable
     private JPanel thinkingRow;
 
-    public AiChatPanel(@NotNull Project project, @NotNull DbExplorerPanel explorer) {
+    public AiChatPanel(@NotNull Project project) {
         this.project = project;
-        this.explorer = explorer;
+        this.opener = SessionOpener.getInstance(project);
 
         setLayout(new BorderLayout());
+
         transcript.setBorder(JBUI.Borders.empty(4, 4, 8, 4));
         scrollPane = new JBScrollPane(transcript);
         scrollPane.setBorder(null);
         scrollPane.getVerticalScrollBar().setUnitIncrement(16);
         add(scrollPane, BorderLayout.CENTER);
         add(buildInputArea(), BorderLayout.SOUTH);
+        add(buildConnectionBar(), BorderLayout.NORTH);
+
+        refreshConnections();
+        // Keep the switcher in sync when connections are added/edited/deleted in DB Explorer.
+        community.intelladb.connection.ConnectionManager.getInstance(project).addListener(() -> {
+            if (!disposed) {
+                refreshConnections();
+            }
+        });
 
         appendMessage(bubble("Intella DB AI",
                 htmlBody("Ask about your database in plain English — e.g. “Which customers ordered the most?”<br>"
-                        + "Answers include a SQL block with a Run button; results appear right here in the chat."),
-                false, null));
+                        + "Answers include a SQL block with a Run button; results appear right here in the chat.<br>"
+                        + "Switch the connection any time using the selector above."),
+                false));
+    }
+
+    // ------------------------------------------------------------------ connection bar
+
+    private JComponent buildConnectionBar() {
+        JPanel bar = new JPanel(new BorderLayout());
+        connectionCombo.setRenderer(new SimpleListCellRenderer<>() {
+            @Override
+            public void customize(@NotNull javax.swing.JList<? extends DbConfig> list, DbConfig value,
+                                  int index, boolean selected, boolean hasFocus) {
+                setText(value == null ? "No connections yet"
+                        : value.name + "  —  " + value.describe());
+            }
+        });
+        connectionCombo.addActionListener(e -> {
+            if (updatingCombo) {
+                return;
+            }
+            Object selected = connectionCombo.getSelectedItem();
+            if (selected instanceof DbConfig config) {
+                setConnection(config);
+            }
+        });
+        JPanel left = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 4));
+        left.setOpaque(false);
+        JBLabel label = new JBLabel("Connection:");
+        left.add(label);
+        left.add(connectionCombo);
+        bar.add(left, BorderLayout.CENTER);
+        bar.setBorder(JBUI.Borders.emptyBottom(2));
+        return bar;
+    }
+
+    /** Reloads saved connections into the switcher, keeping the current selection when possible. */
+    private void refreshConnections() {
+        List<DbConfig> configs = opener.configs();
+        String selectedId = selectedConfig() != null ? selectedConfig().id : null;
+        updatingCombo = true;
+        try {
+            connectionCombo.removeAllItems();
+            for (DbConfig config : configs) {
+                connectionCombo.addItem(config);
+            }
+            DbConfig toSelect = configs.stream()
+                    .filter(c -> c.id.equals(selectedId))
+                    .findFirst()
+                    .orElse(configs.isEmpty() ? null : configs.get(0));
+            if (toSelect != null) {
+                connectionCombo.setSelectedItem(toSelect);
+            }
+        } finally {
+            updatingCombo = false;
+        }
+        if (selectedConfig() == null && !configs.isEmpty()) {
+            setConnection(configs.get(0));
+        } else if (configs.isEmpty()) {
+            contextLabel.setText("Add a connection in the DB Explorer, then pick it here.");
+        }
     }
 
     // ------------------------------------------------------------------ layout helpers
@@ -142,13 +218,28 @@ public final class AiChatPanel extends JPanel {
     // ------------------------------------------------------------------ public API
 
     public void setConnection(@NotNull DbConfig config) {
-        this.config = config;
         contextLabel.setText("Asking about: " + config.name + " (" + config.describe() + ")");
     }
 
     public void setDraft(@NotNull String text) {
         input.setText(text);
         input.requestFocusInWindow();
+    }
+
+    /** Opens the AI Assistant tool window, optionally pre-filling the input. */
+    public static void openWithDraft(@NotNull Project project, @NotNull String text) {
+        com.intellij.openapi.wm.ToolWindow toolWindow =
+                ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID);
+        if (toolWindow == null) {
+            return;
+        }
+        toolWindow.activate(() -> {
+            for (var content : toolWindow.getContentManager().getContents()) {
+                if (content.getComponent() instanceof AiChatPanel panel && !text.isBlank()) {
+                    panel.setDraft(text);
+                }
+            }
+        });
     }
 
     // ------------------------------------------------------------------ sending
@@ -158,25 +249,20 @@ public final class AiChatPanel extends JPanel {
         if (question.isEmpty()) {
             return;
         }
-        // Fall back to the selected connection, then to the first configured one.
-        DbConfig current = config != null ? config : explorer.selectedConfig();
-        if (current == null && !explorer.manager().configs().isEmpty()) {
-            current = explorer.manager().configs().get(0);
-        }
+        DbConfig current = selectedConfig();
         if (current == null) {
             appendMessage(bubble("Intella DB AI",
-                    errorBody("Add a connection in the DB Explorer tree first."), false, null));
+                    errorBody("Add a connection in the DB Explorer, then pick it in the selector above."), false));
             return;
         }
         setConnection(current);
         input.setText("");
         sendButton.setEnabled(false);
-        appendMessage(bubble("You", htmlBody(escapeHtml(question)), true, null));
-        DbConfig target = current;
+        appendMessage(bubble("You", htmlBody(escapeHtml(question)), true));
         // Connects (with password prompt) when needed, then continues on the EDT.
         // The provider pre-check runs inside doSend's background path (PasswordSafe
         // must not be read on the EDT).
-        explorer.withSession(target, session -> doSend(target, session, question));
+        opener.withSession(current, session -> doSend(current, session, question));
     }
 
     private void doSend(@NotNull DbConfig current, @NotNull DbSession session, @NotNull String question) {
@@ -218,7 +304,7 @@ public final class AiChatPanel extends JPanel {
                 String message = cause instanceof AiException aiError
                         ? escapeHtml(aiError.getMessage()).replace("\n", "<br>")
                         : "AI request failed: " + escapeHtml(String.valueOf(cause.getMessage()));
-                appendMessage(bubble("Intella DB AI", errorBody(message), false, null));
+                appendMessage(bubble("Intella DB AI", errorBody(message), false));
             } else {
                 String sql = AiAssistant.firstSqlBlock(answer);
                 JPanel answerRow = assistantAnswerRow(answer, sql, current);
@@ -245,7 +331,7 @@ public final class AiChatPanel extends JPanel {
             }
         });
         body.add(cancel, BorderLayout.EAST);
-        thinkingRow = bubble("Intella DB AI", body, false, null);
+        thinkingRow = bubble("Intella DB AI", body, false);
         appendMessage(thinkingRow);
     }
 
@@ -263,7 +349,7 @@ public final class AiChatPanel extends JPanel {
         JPanel row;
         if (sql == null || sql.isBlank()) {
             body = htmlBody(escapeHtml(answer).replace("\n", "<br>"));
-            row = bubble("Intella DB AI (" + escapeHtml(settingsLabel()) + ")", body, false, null);
+            row = bubble("Intella DB AI (" + escapeHtml(settingsLabel()) + ")", body, false);
         } else {
             String prose = answer.substring(0, answer.indexOf(sql) >= 0
                     ? Math.max(0, answer.indexOf("```"))
@@ -287,18 +373,18 @@ public final class AiChatPanel extends JPanel {
             actions.add(toConsole);
             actions.add(copy);
             stack.add(actions);
-            row = bubble("Intella DB AI (" + escapeHtml(settingsLabel()) + ")", stack, false, null);
+            row = bubble("Intella DB AI (" + escapeHtml(settingsLabel()) + ")", stack, false);
         }
         return row;
     }
 
     /** Runs the SQL and appends the result table into the conversation. */
     private void runSqlInline(@NotNull DbConfig forConfig, @NotNull String sql) {
-        explorer.withSession(forConfig, session -> {
+        opener.withSession(forConfig, session -> {
             ResultsPanel results = new ResultsPanel();
             results.setPreferredSize(new Dimension(BUBBLE_TEXT_WIDTH, INLINE_RESULT_HEIGHT));
             results.showRunning();
-            JPanel resultRow = bubble("Query result", results, false, null);
+            JPanel resultRow = bubble("Query result", results, false);
             appendMessage(resultRow);
             ApplicationManager.getApplication().executeOnPooledThread(() -> {
                 SqlResult result = session.execute(sql);
@@ -310,21 +396,35 @@ public final class AiChatPanel extends JPanel {
         });
     }
 
+    /** Hands the SQL to the DB Explorer's console (activating it if needed). */
     private void insertIntoConsole(@NotNull DbConfig forConfig, @NotNull String sql) {
-        ConsolePanel console = explorer.openConsole(forConfig);
-        if (console != null) {
-            console.setSql(sql);
+        var toolWindow = ToolWindowManager.getInstance(project).getToolWindow(DbToolWindowFactory.TOOL_WINDOW_ID);
+        if (toolWindow == null) {
+            return;
         }
+        toolWindow.activate(() -> {
+            for (var content : toolWindow.getContentManager().getContents()) {
+                if (content.getComponent() instanceof DbExplorerPanel explorer) {
+                    ConsolePanel console = explorer.openConsole(forConfig);
+                    if (console != null) {
+                        console.setSql(sql);
+                    }
+                }
+            }
+        });
     }
 
     private void appendMessage(@NotNull JPanel row) {
         addRow(row);
     }
 
+    private @Nullable DbConfig selectedConfig() {
+        return connectionCombo.getSelectedItem() instanceof DbConfig config ? config : null;
+    }
+
     // ------------------------------------------------------------------ bubble building
 
-    private @NotNull JPanel bubble(@NotNull String title, @NotNull JComponent body, boolean user,
-                                   @SuppressWarnings("unused") Object ignored) {
+    private @NotNull JPanel bubble(@NotNull String title, @NotNull JComponent body, boolean user) {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBackground(user ? USER_BUBBLE : AI_BUBBLE);
         panel.setBorder(BorderFactory.createCompoundBorder(
@@ -341,9 +441,8 @@ public final class AiChatPanel extends JPanel {
 
     /** HTML body label with a fixed wrap width — sizes correctly inside GridBagLayout rows. */
     private @NotNull JBLabel htmlBody(@NotNull String html) {
-        JBLabel label = new JBLabel("<html><body style='width:" + BUBBLE_TEXT_WIDTH + "px'>"
+        return new JBLabel("<html><body style='width:" + BUBBLE_TEXT_WIDTH + "px'>"
                 + html + "</body></html>");
-        return label;
     }
 
     private @NotNull JBLabel errorBody(@NotNull String html) {
@@ -394,4 +493,9 @@ public final class AiChatPanel extends JPanel {
                     com.intellij.ui.JBColor.isBright() ? new Color(0xD0D0D0) : new Color(0x43454A));
     private static final com.intellij.ui.JBColor ERROR_BORDER =
             com.intellij.ui.JBColor.namedColor("IntellaDb.errorBorder", new Color(0xE55765));
+
+    @Override
+    public void dispose() {
+        disposed = true;
+    }
 }

@@ -165,10 +165,10 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
             }
         });
         group.addSeparator();
-        group.add(new AnAction("AI Assistant", "Ask about the database in natural language", IntellaDbIcons.AI) {
+        group.add(new AnAction("AI Assistant", "Open the AI Assistant tool window", IntellaDbIcons.AI) {
             @Override
             public void actionPerformed(@NotNull AnActionEvent e) {
-                openAiAssistant();
+                AiChatPanel.openWithDraft(project, "");
             }
         });
         group.add(new AnAction("AI Provider Settings", "Configure the AI provider (provider, key, model)",
@@ -209,33 +209,10 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         table.showIn(this, panel);
     }
 
-    /** Opens (or focuses) the AI assistant tab. */
-    public void openAiAssistant() {
-        AiChatPanel aiPanel = aiPanel();
-        if (aiPanel == null) {
-            aiPanel = new AiChatPanel(project, this);
-            tabs.addTab("AI Assistant", IntellaDbIcons.AI, aiPanel);
-        }
-        DbConfig config = selectedConfig();
-        if (config != null) {
-            aiPanel.setConnection(config);
-        }
-        tabs.setSelectedComponent(aiPanel);
-    }
-
-    public @Nullable AiChatPanel aiPanel() {
-        for (int i = 0; i < tabs.getTabCount(); i++) {
-            if (tabs.getComponentAt(i) instanceof AiChatPanel panel) {
-                return panel;
-            }
-        }
-        return null;
-    }
-
-    /** Closes the given (or the selected) tab; the AI tab is never closed. */
+    /** Closes the given (or the selected) tab. */
     public void closeTab(@Nullable java.awt.Component component) {
         int index = component != null ? tabs.indexOfComponent(component) : tabs.getSelectedIndex();
-        if (index >= 0 && !(tabs.getComponentAt(index) instanceof AiChatPanel)) {
+        if (index >= 0) {
             tabs.removeTabAt(index);
         }
     }
@@ -262,48 +239,7 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
 
     /** Connects (prompting for a password if needed) and then runs {@code action} on the EDT. */
     public void withSession(@NotNull DbConfig config, @NotNull Consumer<DbSession> action) {
-        DbSession existing = manager.session(config.id);
-        if (existing != null) {
-            action.accept(existing);
-            return;
-        }
-        // PasswordSafe access must not run on the EDT.
-        ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            String password = manager.readPassword(config);
-            if (password != null) {
-                connectInBackground(config, password, action);
-                return;
-            }
-            ApplicationManager.getApplication().invokeLater(() -> {
-                String typed = Messages.showPasswordDialog(project,
-                        "Password for " + config.user + "@" + config.describe(),
-                        "Connect to " + config.dialect().displayName(), Messages.getQuestionIcon());
-                if (typed == null) {
-                    return;
-                }
-                manager.rememberPasswordInMemory(config, typed);
-                connectInBackground(config, typed, action);
-            });
-        });
-    }
-
-    private void connectInBackground(@NotNull DbConfig config, @NotNull String password,
-                                     @NotNull Consumer<DbSession> action) {
-        treePanel.setConnecting(config, true);
-        ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            try {
-                DbSession session = manager.connect(config, password);
-                ApplicationManager.getApplication().invokeLater(() -> action.accept(session));
-            } catch (Exception ex) {
-                ApplicationManager.getApplication().invokeLater(() -> {
-                    treePanel.setConnecting(config, false);
-                    treePanel.setError(config, ex.getMessage() == null ? ex.toString() : ex.getMessage());
-                    Messages.showErrorDialog(project,
-                            "Could not connect to " + config.describe() + ":\n" + ex.getMessage(),
-                            "Intella DB");
-                });
-            }
-        });
+        community.intelladb.connection.SessionOpener.getInstance(project).withSession(config, action);
     }
 
     public @NotNull ConnectionManager manager() {
