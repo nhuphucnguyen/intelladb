@@ -26,12 +26,15 @@ public final class IntellaSqlParserDefinition implements ParserDefinition {
 
     @Override
     public @NotNull PsiParser createParser(Project project) {
+        // Flat tree: the file node (the {@code root} type given in) directly holds the tokens.
+        // Closing the outermost marker with any other type breaks incremental reparsing —
+        // the platform diffs old vs new trees expecting a FILE node on top.
         return (root, builder) -> {
             PsiBuilder.Marker marker = builder.mark();
             while (!builder.eof()) {
                 builder.advanceLexer();
             }
-            marker.done(IntellaSqlLanguage.Tokens.ROOT);
+            marker.done(root);
             return builder.getTreeBuilt();
         };
     }

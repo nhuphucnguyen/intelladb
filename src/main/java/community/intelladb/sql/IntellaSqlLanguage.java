@@ -30,7 +30,6 @@ public final class IntellaSqlLanguage extends Language {
         public static final IElementType SEMICOLON = new IElementType("IDB_SEMICOLON", INSTANCE);
         public static final IElementType OPERATOR = new IElementType("IDB_OPERATOR", INSTANCE);
         public static final IElementType WHITESPACE = new IElementType("IDB_WHITESPACE", INSTANCE);
-        public static final IElementType ROOT = new IElementType("IDB_SQL_ROOT", INSTANCE);
 
         private Tokens() {
         }
