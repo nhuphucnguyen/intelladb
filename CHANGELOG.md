@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0
+
+### Improved
+- AI Assistant chat visuals reworked: rounded, antialiased bubbles with theme-aware
+  colors that keep clear contrast in dark themes (the assistant bubble previously used
+  the same color as the panel background and was effectively invisible).
+- Connection selector at the top of the AI Assistant now stretches with the tool window
+  (GridBag layout with a separator line) instead of clipping when the window is narrow.
+- Chat text wraps to the actual tool-window width, so nothing is cut off in narrow
+  tool windows.
+
 ## 0.1.0
 
 Initial release.
