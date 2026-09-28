@@ -9,7 +9,9 @@ import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.JBUI;
+import com.intellij.icons.AllIcons;
 import community.intelladb.IntellaDbIcons;
+import community.intelladb.util.JsonText;
 import community.intelladb.connection.SqlResult;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -48,8 +50,16 @@ final class ResultGrid extends JBTable {
             "int2", "int4", "int8", "smallint", "integer", "bigint", "serial", "bigserial", "smallserial",
             "numeric", "decimal", "float4", "float8", "real", "double precision", "money", "oid");
 
+    private static final int CELL_PADDING = 6;
+    /** JSON cells longer than this are not parsed for the icon (they can still be opened). */
+    private static final int MAX_JSON_SNIFF = 1_000_000;
+
+    private enum JsonKind { NONE, OBJECT, ARRAY }
+
     private final Project project;
     private final RowHeader rowHeader = new RowHeader();
+    /** Per-cell JSON detection, computed lazily once per result (key: modelRow * columns + modelColumn). */
+    private final java.util.Map<Long, JsonKind> jsonCells = new java.util.HashMap<>();
     private GridModel model = new GridModel(List.of(), List.of(), List.of());
 
     ResultGrid(@NotNull Project project) {
@@ -65,14 +75,24 @@ final class ResultGrid extends JBTable {
         setDefaultRenderer(Object.class, new CellRenderer());
         applyEditorFont();
         getSelectionModel().addListSelectionListener(e -> rowHeader.repaint());
-        addMouseListener(new MouseAdapter() {
+        MouseAdapter mouse = new MouseAdapter() {
             @Override
             public void mouseClicked(@NotNull MouseEvent e) {
-                if (e.getClickCount() == 2) {
-                    viewCell(rowAtPoint(e.getPoint()), columnAtPoint(e.getPoint()));
+                int row = rowAtPoint(e.getPoint());
+                int column = columnAtPoint(e.getPoint());
+                if (e.getClickCount() == 2 || (e.getClickCount() == 1 && onJsonIcon(e.getPoint()))) {
+                    viewCell(row, column);
                 }
             }
-        });
+
+            @Override
+            public void mouseMoved(@NotNull MouseEvent e) {
+                setCursor(onJsonIcon(e.getPoint())
+                        ? java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR) : null);
+            }
+        };
+        addMouseListener(mouse);
+        addMouseMotionListener(mouse);
     }
 
     /** Wraps the grid in a scroll pane whose row header is the frozen row-number gutter. */
@@ -87,6 +107,7 @@ final class ResultGrid extends JBTable {
         model = result == null
                 ? new GridModel(List.of(), List.of(), List.of())
                 : new GridModel(result.columns, result.columnTypes, result.rows);
+        jsonCells.clear();
         setModel(model);
         TableRowSorter<GridModel> sorter = new TableRowSorter<>(model);
         for (int c = 0; c < model.getColumnCount(); c++) {
@@ -134,6 +155,55 @@ final class ResultGrid extends JBTable {
         setColumnSelectionInterval(0, getColumnCount() - 1);
     }
 
+    // ------------------------------------------------------------------ JSON cells
+
+    private @NotNull JsonKind jsonKind(int viewRow, int viewColumn) {
+        int modelRow = convertRowIndexToModel(viewRow);
+        int modelColumn = convertColumnIndexToModel(viewColumn);
+        long key = (long) modelRow * Math.max(1, model.getColumnCount()) + modelColumn;
+        return jsonCells.computeIfAbsent(key, k -> detectJson(model.getValueAt(modelRow, modelColumn)));
+    }
+
+    private static @NotNull JsonKind detectJson(@Nullable Object value) {
+        if (!(value instanceof String text) || text.length() > MAX_JSON_SNIFF) {
+            return JsonKind.NONE;
+        }
+        String trimmed = text.stripLeading();
+        if (!(trimmed.startsWith("{") || trimmed.startsWith("[")) || !JsonText.isJson(text)) {
+            return JsonKind.NONE;
+        }
+        return trimmed.startsWith("{") ? JsonKind.OBJECT : JsonKind.ARRAY;
+    }
+
+    private static @Nullable javax.swing.Icon jsonIcon(@NotNull JsonKind kind) {
+        return switch (kind) {
+            case OBJECT -> AllIcons.Json.Object;
+            case ARRAY -> AllIcons.Json.Array;
+            case NONE -> null;
+        };
+    }
+
+    /** Is the point on the {} / [] icon of a JSON cell? A click there opens the JSON viewer. */
+    private boolean onJsonIcon(@NotNull java.awt.Point point) {
+        int row = rowAtPoint(point);
+        int column = columnAtPoint(point);
+        if (row < 0 || column < 0) {
+            return false;
+        }
+        javax.swing.Icon icon = jsonIcon(jsonKind(row, column));
+        if (icon == null) {
+            return false;
+        }
+        java.awt.Rectangle cell = getCellRect(row, column, false);
+        int start = cell.x + JBUI.scale(CELL_PADDING);
+        return point.x >= start - JBUI.scale(2) && point.x <= start + icon.getIconWidth() + JBUI.scale(2);
+    }
+
+    @Override
+    public String getToolTipText(@NotNull MouseEvent event) {
+        return onJsonIcon(event.getPoint()) ? "Open JSON viewer" : super.getToolTipText(event);
+    }
+
     // ------------------------------------------------------------------ rendering
 
     private void applyEditorFont() {
@@ -171,9 +241,14 @@ final class ResultGrid extends JBTable {
         protected void customizeCellRenderer(@NotNull JTable table, @Nullable Object value, boolean selected,
                                              boolean hasFocus, int row, int column) {
             setFont(table.getFont());
-            setBorder(JBUI.Borders.empty(0, 6));
+            setBorder(JBUI.Borders.empty(0, CELL_PADDING));
             boolean numeric = isNumericColumn(table.convertColumnIndexToModel(column));
             setTextAlign(numeric ? SwingConstants.RIGHT : SwingConstants.LEFT);
+            javax.swing.Icon json = value == null ? null : jsonIcon(jsonKind(row, column));
+            if (json != null) {
+                setIcon(json); // clickable: opens the JSON viewer
+                setIconTextGap(JBUI.scale(4));
+            }
             if (value == null) {
                 append("<null>", SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES);
             } else {
