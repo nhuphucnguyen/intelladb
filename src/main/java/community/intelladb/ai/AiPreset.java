@@ -74,6 +74,15 @@ public record AiPreset(@NotNull String id, @NotNull String label, @NotNull Strin
             ZAI_CODING_PLAN, ZAI_API, BIGMODEL, OPENAI, DEEPSEEK, OPENROUTER, OLLAMA, LMSTUDIO, CUSTOM
     };
 
+    /**
+     * Reasoning levels the picker offers for {@code model} on this provider (besides Default):
+     * GLM-5.3 models take low / high / max, anything else the common low / medium / high.
+     */
+    public @NotNull List<ReasoningEffort> reasoningLevels(@NotNull String model) {
+        return sampling == Sampling.GLM_5_3 && model.startsWith("glm-")
+                ? ReasoningEffort.GLM_LEVELS : ReasoningEffort.STANDARD_LEVELS;
+    }
+
     public static @Nullable AiPreset byId(@NotNull String id) {
         for (AiPreset preset : ALL) {
             if (preset.id.equals(id)) {

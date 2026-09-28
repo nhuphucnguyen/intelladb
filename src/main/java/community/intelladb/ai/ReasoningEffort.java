@@ -12,7 +12,13 @@ public enum ReasoningEffort {
     DEFAULT("Default", null),
     LOW("Low", "low"),
     MEDIUM("Medium", "medium"),
-    HIGH("High", "high");
+    HIGH("High", "high"),
+    MAX("Max", "max");
+
+    /** Levels most OpenAI-compatible reasoning models accept. */
+    public static final java.util.List<ReasoningEffort> STANDARD_LEVELS = java.util.List.of(LOW, MEDIUM, HIGH);
+    /** Z.ai GLM-5.3 / GLM-5.3-Flash. */
+    public static final java.util.List<ReasoningEffort> GLM_LEVELS = java.util.List.of(LOW, HIGH, MAX);
 
     public final String label;
     /** Value of {@code reasoning_effort}; null = leave it out of the request. */

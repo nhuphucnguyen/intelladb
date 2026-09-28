@@ -133,9 +133,10 @@ public final class AiSettings {
         return props().getValue(key(presetId, MODEL), presetOrCustom(presetId).defaultModel());
     }
 
-    /** Reasoning level picked for this model (Default until one is picked). */
+    /** Reasoning level picked for this model (Default until one is picked, or if the model does not offer it). */
     public @NotNull ReasoningEffort reasoningEffort(@NotNull String presetId, @NotNull String model) {
-        return ReasoningEffort.parse(props().getValue(key(presetId, REASONING + model)));
+        ReasoningEffort stored = ReasoningEffort.parse(props().getValue(key(presetId, REASONING + model)));
+        return presetOrCustom(presetId).reasoningLevels(model).contains(stored) ? stored : ReasoningEffort.DEFAULT;
     }
 
     public double temperature(@NotNull String presetId) {

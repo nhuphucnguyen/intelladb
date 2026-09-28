@@ -779,7 +779,10 @@ public final class AiChatPanel extends JPanel implements Disposable {
                 current == ReasoningEffort.DEFAULT ? model : model + " · " + current.label, true);
         item.getTemplatePresentation().setDescription(provider.label() + " — " + model);
         item.getTemplatePresentation().setIcon(active ? AllIcons.Actions.Checked : null);
-        for (ReasoningEffort effort : ReasoningEffort.values()) {
+        List<ReasoningEffort> levels = new java.util.ArrayList<>();
+        levels.add(ReasoningEffort.DEFAULT);
+        levels.addAll(provider.reasoningLevels(model));
+        for (ReasoningEffort effort : levels) {
             String text = effort == ReasoningEffort.DEFAULT ? "Default (provider decides)" : effort.label;
             item.add(new DumbAwareAction(text, "Reasoning effort: " + effort.label,
                     effort == current ? AllIcons.Actions.Checked : null) {
@@ -796,6 +799,17 @@ public final class AiChatPanel extends JPanel implements Disposable {
     private final class ModelPickerAction extends ComboBoxAction {
         ModelPickerAction() {
             setSmallVariant(true);
+        }
+
+        /** Combo popups open submenus on click by default; the reasoning levels should show on hover. */
+        @Override
+        protected @NotNull com.intellij.openapi.ui.popup.JBPopup createActionPopup(
+                @NotNull DefaultActionGroup group, @NotNull DataContext context, @Nullable Runnable disposeCallback) {
+            var popup = super.createActionPopup(group, context, disposeCallback);
+            if (popup instanceof com.intellij.ui.popup.list.ListPopupImpl list) {
+                list.setShowSubmenuOnHover(true);
+            }
+            return popup;
         }
 
         @Override

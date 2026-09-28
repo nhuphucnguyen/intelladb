@@ -1,6 +1,7 @@
 package community.intelladb;
 
 import community.intelladb.ai.AiPreset;
+import community.intelladb.ai.ReasoningEffort;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -39,5 +40,16 @@ class AiPresetTest {
     void otherPresetsKeepSingleDefault() {
         assertEquals(List.of("deepseek-chat"), AiPreset.DEEPSEEK.models());
         assertEquals(List.of("llama3.1"), AiPreset.OLLAMA.models());
+    }
+
+    @Test
+    void glmModelsOfferLowHighMax() {
+        assertEquals(List.of(ReasoningEffort.LOW, ReasoningEffort.HIGH, ReasoningEffort.MAX),
+                AiPreset.ZAI_CODING_PLAN.reasoningLevels("glm-5.3"));
+        assertEquals(List.of(ReasoningEffort.LOW, ReasoningEffort.HIGH, ReasoningEffort.MAX),
+                AiPreset.ZAI_API.reasoningLevels("glm-5.3-flash"));
+        assertEquals(List.of(ReasoningEffort.LOW, ReasoningEffort.MEDIUM, ReasoningEffort.HIGH),
+                AiPreset.OPENAI.reasoningLevels("o4-mini"));
+        assertEquals("max", ReasoningEffort.MAX.wireValue);
     }
 }
