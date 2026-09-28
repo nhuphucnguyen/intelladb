@@ -39,6 +39,8 @@ public final class AiSettings {
     private static final String TEMPERATURE = "temperature";
     private static final String TOP_P = "topP";
     private static final String MAX_TOKENS = "maxTokens";
+    /** Per model: {@code intelladb.ai.provider.<presetId>.reasoning.<model>}. */
+    private static final String REASONING = "reasoning.";
     /** Pre-M23 global keys (they belonged to the then-selected preset). */
     private static final String LEGACY_URL = PREFIX + "baseUrl";
     private static final String LEGACY_TEMPERATURE = PREFIX + "temperature";
@@ -96,6 +98,17 @@ public final class AiSettings {
         return maxTokens(presetId());
     }
 
+    /** Reasoning level of the active model. */
+    public @NotNull ReasoningEffort reasoningEffort() {
+        return reasoningEffort(presetId(), model());
+    }
+
+    /** Makes {@code presetId}/{@code model} what the chat sends to, thinking at {@code effort}. */
+    public void setActive(@NotNull String presetId, @NotNull String model, @NotNull ReasoningEffort effort) {
+        props().setValue(key(presetId, REASONING + model), effort.name(), ReasoningEffort.DEFAULT.name());
+        setActive(presetId, model);
+    }
+
     /** Makes {@code presetId}/{@code model} what the chat sends to (the chat's model picker). */
     public void setActive(@NotNull String presetId, @NotNull String model) {
         props().setValue(K_PRESET, presetId);
@@ -118,6 +131,11 @@ public final class AiSettings {
     /** Last model used / typed for this provider (its default until then). */
     public @NotNull String model(@NotNull String presetId) {
         return props().getValue(key(presetId, MODEL), presetOrCustom(presetId).defaultModel());
+    }
+
+    /** Reasoning level picked for this model (Default until one is picked). */
+    public @NotNull ReasoningEffort reasoningEffort(@NotNull String presetId, @NotNull String model) {
+        return ReasoningEffort.parse(props().getValue(key(presetId, REASONING + model)));
     }
 
     public double temperature(@NotNull String presetId) {

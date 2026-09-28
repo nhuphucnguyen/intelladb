@@ -93,7 +93,8 @@ public final class AiCredentials {
         // ping enough budget to reach the answer, but keep it bounded.
         OpenAiCompatibleClient client = new OpenAiCompatibleClient(
                 settings.baseUrl(), key == null ? "" : key, settings.model(),
-                settings.temperature(), settings.topP(), Math.min(settings.maxTokens(), 4096));
+                settings.temperature(), settings.topP(), Math.min(settings.maxTokens(), 4096),
+                settings.reasoningEffort());
         return client.chat(List.of(ChatMessage.user("Reply with exactly: OK")));
     }
 

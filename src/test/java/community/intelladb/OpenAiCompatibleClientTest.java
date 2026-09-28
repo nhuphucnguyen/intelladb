@@ -6,6 +6,7 @@ import com.sun.net.httpserver.HttpServer;
 import community.intelladb.ai.AiException;
 import community.intelladb.ai.ChatMessage;
 import community.intelladb.ai.OpenAiCompatibleClient;
+import community.intelladb.ai.ReasoningEffort;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -81,6 +82,16 @@ class OpenAiCompatibleClientTest {
         assertEquals("system", body.getAsJsonArray("messages").get(0).getAsJsonObject().get("role").getAsString());
         assertEquals("How many orders?",
                 body.getAsJsonArray("messages").get(1).getAsJsonObject().get("content").getAsString());
+    }
+
+    @Test
+    void reasoningEffortIsSentOnlyWhenPicked() {
+        client().chat(List.of(ChatMessage.user("hi")));
+        assertTrue(!lastBody.get().has("reasoning_effort")); // Default: left out
+
+        new OpenAiCompatibleClient("http://127.0.0.1:" + server.getAddress().getPort() + "/v1", "k", "m",
+                0.2, 0.95, 512, ReasoningEffort.HIGH).chat(List.of(ChatMessage.user("hi")));
+        assertEquals("high", lastBody.get().get("reasoning_effort").getAsString());
     }
 
     @Test

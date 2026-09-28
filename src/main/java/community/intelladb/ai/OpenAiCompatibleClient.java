@@ -27,10 +27,18 @@ public final class OpenAiCompatibleClient {
     private final double temperature;
     private final double topP;
     private final int maxTokens;
+    private final ReasoningEffort reasoningEffort;
     private final HttpClient http;
 
     public OpenAiCompatibleClient(@NotNull String baseUrl, @NotNull String apiKey,
                                   @NotNull String model, double temperature, double topP, int maxTokens) {
+        this(baseUrl, apiKey, model, temperature, topP, maxTokens, ReasoningEffort.DEFAULT);
+    }
+
+    public OpenAiCompatibleClient(@NotNull String baseUrl, @NotNull String apiKey,
+                                  @NotNull String model, double temperature, double topP, int maxTokens,
+                                  @NotNull ReasoningEffort reasoningEffort) {
+        this.reasoningEffort = reasoningEffort;
         this.baseUrl = trimTrailingSlash(baseUrl);
         this.apiKey = apiKey;
         this.model = model;
@@ -57,6 +65,9 @@ public final class OpenAiCompatibleClient {
         body.addProperty("temperature", temperature);
         body.addProperty("top_p", topP);
         body.addProperty("max_tokens", maxTokens);
+        if (reasoningEffort.wireValue != null) {
+            body.addProperty("reasoning_effort", reasoningEffort.wireValue);
+        }
         JsonArray array = new JsonArray();
         for (ChatMessage message : messages) {
             JsonObject m = new JsonObject();

@@ -37,6 +37,7 @@ import community.intelladb.ai.AiSettings;
 import community.intelladb.ai.ChatMessage;
 import community.intelladb.ai.MarkdownToHtml;
 import community.intelladb.ai.OpenAiCompatibleClient;
+import community.intelladb.ai.ReasoningEffort;
 import community.intelladb.connection.DbConfig;
 import community.intelladb.connection.DbSession;
 import community.intelladb.connection.SessionOpener;
@@ -387,6 +388,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
         double temperature = settings.temperature();
         double topP = settings.topP();
         int maxTokens = settings.maxTokens();
+        ReasoningEffort reasoningEffort = settings.reasoningEffort();
         boolean localProvider = !settings.preset().needsApiKey();
 
         CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
@@ -400,7 +402,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
                         + "Open Settings → Tools → Intella DB — AI Provider.");
             }
             OpenAiCompatibleClient client = new OpenAiCompatibleClient(
-                    baseUrl, key == null ? "" : key, model, temperature, topP, maxTokens);
+                    baseUrl, key == null ? "" : key, model, temperature, topP, maxTokens, reasoningEffort);
             return client.chat(messages);
         });
         pending = future;
@@ -764,6 +766,37 @@ public final class AiChatPanel extends JPanel implements Disposable {
         });
     }
 
+    /**
+     * A model in the picker: hovering opens its reasoning levels (picking one selects the
+     * model at that level); clicking the model itself selects it at its current level.
+     */
+    private static @NotNull DefaultActionGroup modelItem(@NotNull AiSettings settings, @NotNull AiPreset provider,
+                                                         @NotNull String model) {
+        boolean active = provider.id().equals(settings.presetId()) && model.equals(settings.model());
+        ReasoningEffort current = settings.reasoningEffort(provider.id(), model);
+        DefaultActionGroup item = new DefaultActionGroup(
+                current == ReasoningEffort.DEFAULT ? model : model + " · " + current.label, true) {
+            @Override
+            public void actionPerformed(@NotNull AnActionEvent e) {
+                settings.setActive(provider.id(), model);
+            }
+        };
+        item.getTemplatePresentation().setDescription(provider.label() + " — " + model);
+        item.getTemplatePresentation().setIcon(active ? AllIcons.Actions.Checked : null);
+        item.getTemplatePresentation().setPerformGroup(true);
+        for (ReasoningEffort effort : ReasoningEffort.values()) {
+            String text = effort == ReasoningEffort.DEFAULT ? "Default (provider decides)" : effort.label;
+            item.add(new DumbAwareAction(text, "Reasoning effort: " + effort.label,
+                    effort == current ? AllIcons.Actions.Checked : null) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e) {
+                    settings.setActive(provider.id(), model, effort);
+                }
+            });
+        }
+        return item;
+    }
+
     /** "glm-5.3 ▾" next to the connection selector: models grouped by provider. */
     private final class ModelPickerAction extends ComboBoxAction {
         ModelPickerAction() {
@@ -778,14 +811,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
             for (AiPreset provider : usableProviders) {
                 group.addSeparator(provider.label());
                 for (String model : settings.models(provider.id())) {
-                    boolean active = provider.id().equals(settings.presetId()) && model.equals(settings.model());
-                    group.add(new DumbAwareAction(model, provider.label() + " — " + model,
-                            active ? AllIcons.Actions.Checked : null) {
-                        @Override
-                        public void actionPerformed(@NotNull AnActionEvent e) {
-                            settings.setActive(provider.id(), model);
-                        }
-                    });
+                    group.add(modelItem(settings, provider, model));
                 }
             }
             group.addSeparator();
@@ -805,8 +831,11 @@ public final class AiChatPanel extends JPanel implements Disposable {
             AiSettings settings = AiSettings.getInstance();
             List<AiPreset> usable = usableProviders;
             if (usable.contains(settings.preset())) {
-                e.getPresentation().setText(settings.model());
-                e.getPresentation().setDescription("Model: " + settings.preset().label() + " — " + settings.model());
+                ReasoningEffort effort = settings.reasoningEffort();
+                String level = effort == ReasoningEffort.DEFAULT ? "" : " · " + effort.label;
+                e.getPresentation().setText(settings.model() + level);
+                e.getPresentation().setDescription("Model: " + settings.preset().label() + " — " + settings.model()
+                        + (effort == ReasoningEffort.DEFAULT ? "" : ", reasoning " + effort.label.toLowerCase()));
             } else {
                 e.getPresentation().setText(usable.isEmpty() ? "No AI provider" : "Select model");
                 e.getPresentation().setDescription(usable.isEmpty()
