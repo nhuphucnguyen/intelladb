@@ -81,12 +81,14 @@ public final class AiChatPanel extends JPanel implements Disposable {
 
     private static final int BUBBLE_TEXT_WIDTH = 460;
     private static final int INLINE_RESULT_HEIGHT = 190;
+    private static final int MIN_INPUT_ROWS = 2;
+    private static final int MAX_INPUT_ROWS = 8;
 
     private final Project project;
     private final SessionOpener opener;
     private final JPanel transcript = new JPanel(new GridBagLayout());
     private final JBScrollPane scrollPane;
-    private final JBTextArea input = new JBTextArea(2, 36);
+    private final JBTextArea input = new JBTextArea(MIN_INPUT_ROWS, 36);
     private final JButton sendButton = new JButton("Send");
     private final ComboBox<DbConfig> connectionCombo = new ComboBox<>();
     private final Map<String, List<ChatMessage>> historyByConfig = new HashMap<>();
@@ -129,7 +131,6 @@ public final class AiChatPanel extends JPanel implements Disposable {
             }
         });
 
-        appendWelcome();
     }
 
     // ------------------------------------------------------------------ connection bar
@@ -200,15 +201,9 @@ public final class AiChatPanel extends JPanel implements Disposable {
         historyByConfig.clear();
         transcript.removeAll();
         sendButton.setEnabled(true);
-        appendWelcome();
+        transcript.revalidate();
+        transcript.repaint();
         input.requestFocusInWindow();
-    }
-
-    private void appendWelcome() {
-        appendMessage(bubble(null,
-                body("Ask about your database in plain English — e.g. “Which customers ordered the most?”\n"
-                        + "Answers include a SQL block you can Run right here, or send to a console."),
-                false), false);
     }
 
     /** Reloads saved connections into the switcher, keeping the current selection when possible. */
@@ -266,7 +261,10 @@ public final class AiChatPanel extends JPanel implements Disposable {
         input.setLineWrap(true);
         input.setWrapStyleWord(true);
         input.setBorder(JBUI.Borders.empty(6, 8));
-        input.getEmptyText().setText("Ask about your data…  (Enter to send, Shift+Enter for new line)");
+        // The placeholder replaces the old welcome message in the transcript.
+        input.getEmptyText().setText("Ask about your database in plain English — e.g. “Which customers ordered the most?”");
+        input.getEmptyText().appendLine("Enter to send · Shift+Enter for a new line",
+                com.intellij.ui.SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES, null);
         JBScrollPane inputScroll = new JBScrollPane(input);
         inputScroll.setBorder(JBUI.Borders.empty());
 
@@ -288,9 +286,24 @@ public final class AiChatPanel extends JPanel implements Disposable {
         south.setBorder(JBUI.Borders.empty(6, 8, 8, 8));
         south.add(compose, BorderLayout.CENTER);
 
-        // Enter sends; Shift+Enter (and any modified Enter) falls through to newline.
-        input.getInputMap(javax.swing.JComponent.WHEN_FOCUSED)
-                .put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "intella-send");
+        // Enter sends; Shift+Enter inserts a line break. It must be bound explicitly: a
+        // JTextArea only maps plain Enter to insert-break and drops the typed '\n' of
+        // Shift+Enter, so without this binding multi-line questions were impossible.
+        javax.swing.InputMap keys = input.getInputMap(javax.swing.JComponent.WHEN_FOCUSED);
+        keys.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "intella-send");
+        keys.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, KeyEvent.SHIFT_DOWN_MASK),
+                javax.swing.text.DefaultEditorKit.insertBreakAction);
+        // Grow with the text (2–8 lines), then scroll.
+        input.getDocument().addDocumentListener(new com.intellij.ui.DocumentAdapter() {
+            @Override
+            protected void textChanged(@NotNull javax.swing.event.DocumentEvent e) {
+                int lines = Math.max(MIN_INPUT_ROWS, Math.min(MAX_INPUT_ROWS, input.getLineCount()));
+                if (lines != input.getRows()) {
+                    input.setRows(lines);
+                    south.revalidate();
+                }
+            }
+        });
         input.getActionMap().put("intella-send", new javax.swing.AbstractAction() {
             @Override
             public void actionPerformed(java.awt.event.ActionEvent e) {
