@@ -91,8 +91,8 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
     private TxMode txMode = TxMode.AUTO;
     private RunMode runMode = RunMode.PLAYGROUND;
     private @Nullable String schema;
-    /** The schema whose search_path is already applied to the shared session. */
-    private @Nullable String appliedSchema;
+    /** Header toolbars of this console's open editors, refreshed when the schema changes. */
+    private final List<ActionToolbar> toolbars = new java.util.concurrent.CopyOnWriteArrayList<>();
     private volatile boolean running;
     private volatile boolean cancelled;
 
@@ -154,6 +154,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
     public void setSchema(@NotNull String name) {
         schema = name;
         ConsoleStore.getInstance(project).setSchema(config.id, name);
+        toolbars.forEach(ActionToolbar::updateActionsAsync); // show it now, not on the next UI tick
     }
 
     // ------------------------------------------------------------------ editor header
@@ -221,6 +222,8 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         leftBar.setTargetComponent(editor.getContentComponent());
         ActionToolbar rightBar = ActionManager.getInstance().createActionToolbar("IntellaDbConsoleSchema", right, true);
         rightBar.setTargetComponent(editor.getContentComponent());
+        toolbars.add(rightBar);
+        com.intellij.openapi.util.Disposer.register(fileEditor, () -> toolbars.remove(rightBar));
 
         JPanel header = new JPanel(new BorderLayout());
         header.add(leftBar.getComponent(), BorderLayout.WEST);
@@ -351,16 +354,19 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         cancelled = false;
     }
 
-    /** SET search_path when the selected schema differs from what the session already has. */
+    /**
+     * SET search_path to the selected schema before every run. Not cached: the session is
+     * shared between consoles, a reconnect starts from the default, and a ROLLBACK undoes
+     * a SET made inside the transaction — any of which silently put it back on public.
+     */
     private void applySchema(@NotNull DbSession session, @Nullable String target) throws SQLException {
-        if (target == null || target.equals(appliedSchema)) {
+        if (target == null) {
             return;
         }
         SqlResult result = session.execute("SET search_path TO " + IdentifierQuoting.quote(target));
         if (!result.isSuccessful()) {
             throw new SQLException(result.text);
         }
-        appliedSchema = target;
     }
 
     /**

@@ -67,15 +67,13 @@ class QueryHistoryStoreTest {
         QueryHistoryStore store = new QueryHistoryStore(dir.resolve("h.json.gz"));
         QueryHistory history = new QueryHistory(() -> 10, store);
         history.add(config(), null, "select 1", SqlResult.message("select 1", "ok", 1));
-        // saves run in the background; wait for the file
-        for (int i = 0; i < 100 && store.load().isEmpty(); i++) {
-            Thread.sleep(20);
-        }
+        history.awaitSaved();
         QueryHistory reopened = new QueryHistory(() -> 10, store);
         assertEquals(1, reopened.entries().size());
         assertEquals("select 1", reopened.entries().get(0).sql());
         assertTrue(reopened.add(config(), null, "select 2", SqlResult.message("select 2", "ok", 1)).id()
                 > reopened.entries().get(1).id()); // ids continue after the loaded ones
+        reopened.awaitSaved();
     }
 
     @Test

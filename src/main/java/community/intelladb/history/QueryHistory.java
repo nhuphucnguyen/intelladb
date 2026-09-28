@@ -136,6 +136,14 @@ public final class QueryHistory {
         listeners.forEach(Runnable::run);
     }
 
+    /** For tests: blocks until every save queued so far has been written. */
+    @org.jetbrains.annotations.TestOnly
+    public void awaitSaved() throws Exception {
+        if (saver != null) {
+            saver.submit(() -> { }).get();
+        }
+    }
+
     private void save() {
         if (store == null) {
             return;
