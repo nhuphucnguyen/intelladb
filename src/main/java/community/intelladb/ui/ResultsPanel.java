@@ -210,7 +210,8 @@ public final class ResultsPanel extends JPanel {
 
         DefaultActionGroup right = new DefaultActionGroup();
         right.add(new ExtractorComboAction());
-        right.add(new DumbAwareAction("Copy to Clipboard", "Copy all rows in the selected format",
+        right.add(new DumbAwareAction("Copy to Clipboard",
+                "Copy the selected rows (or all rows) in the chosen format",
                 AllIcons.Actions.Copy) {
             @Override
             public void actionPerformed(@NotNull AnActionEvent e) {
@@ -230,7 +231,7 @@ public final class ResultsPanel extends JPanel {
                 return ActionUpdateThread.EDT;
             }
         });
-        right.add(new DumbAwareAction("Export Data…", "Export all rows to a file or the clipboard",
+        right.add(new DumbAwareAction("Export Data…", "Export all or the selected rows to a file or the clipboard",
                 AllIcons.ToolbarDecorator.Export) {
             @Override
             public void actionPerformed(@NotNull AnActionEvent e) {
@@ -283,7 +284,10 @@ public final class ResultsPanel extends JPanel {
         if (!hasRows()) {
             return null;
         }
-        return ResultExporter.export(selectedFormat(), result.columns, result.rows, insertTarget());
+        // Quick copy follows the grid: the selected rows if any, else all — as displayed.
+        List<Object[]> selected = grid.selectedRowsInViewOrder();
+        List<Object[]> rows = selected.isEmpty() ? grid.rowsInViewOrder() : selected;
+        return ResultExporter.export(selectedFormat(), result.columns, rows, insertTarget());
     }
 
     /** Table for SQL Inserts: from the driver's column metadata, else what the opener told us. */
@@ -304,7 +308,8 @@ public final class ResultsPanel extends JPanel {
         } else {
             source = result.sql.strip().replaceAll("\\s+", " ");
         }
-        new ExportDataDialog(project, result, source, target, ddlFor(config)).show();
+        new ExportDataDialog(project, result, grid.rowsInViewOrder(), grid.selectedRowsInViewOrder(),
+                source, target, ddlFor(config)).show();
     }
 
     /** CREATE TABLE for the result's source table, when the connection's catalog knows it. */

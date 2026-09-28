@@ -30,6 +30,7 @@ import com.intellij.ui.JBSplitter;
 import com.intellij.ui.SimpleListCellRenderer;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
+import com.intellij.ui.components.JBRadioButton;
 import com.intellij.ui.components.JBTextArea;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
@@ -68,11 +69,16 @@ final class ExportDataDialog extends DialogWrapper {
 
     private final Project project;
     private final SqlResult result;
+    /** All rows and the selected ones, both in the grid's display order. */
+    private final List<Object[]> allRows;
+    private final List<Object[]> selectedRows;
     private final @Nullable String insertTarget;
     private final @Nullable String ddl;
     private final String baseFileName;
 
     private final ComboBox<Format> extractor = new ComboBox<>(Format.values());
+    private final JBRadioButton allRowsButton = new JBRadioButton();
+    private final JBRadioButton selectedRowsButton = new JBRadioButton();
     private final JBCheckBox transpose = new JBCheckBox("Transpose");
     private final JBCheckBox addDdl = new JBCheckBox("Add table definition (DDL)");
     private final TextFieldWithBrowseButton outputFile = new TextFieldWithBrowseButton();
@@ -85,11 +91,14 @@ final class ExportDataDialog extends DialogWrapper {
      * @param insertTarget table name used by SQL Inserts; null falls back to a placeholder
      * @param ddl          CREATE statement for "Add table definition", or null when unknown
      */
-    ExportDataDialog(@NotNull Project project, @NotNull SqlResult result, @NotNull String source,
-                     @Nullable String insertTarget, @Nullable String ddl) {
+    ExportDataDialog(@NotNull Project project, @NotNull SqlResult result,
+                     @NotNull List<Object[]> allRows, @NotNull List<Object[]> selectedRows,
+                     @NotNull String source, @Nullable String insertTarget, @Nullable String ddl) {
         super(project, true);
         this.project = project;
         this.result = result;
+        this.allRows = allRows;
+        this.selectedRows = selectedRows;
         this.insertTarget = insertTarget;
         this.ddl = ddl;
         this.baseFileName = fileNameFor(source, insertTarget);
@@ -103,6 +112,17 @@ final class ExportDataDialog extends DialogWrapper {
         addDdl.addActionListener(e -> refreshPreview());
         addDdl.setToolTipText(ddl == null ? "Only available for results read from a single known table" : null);
         outputFile.addActionListener(e -> browse());
+        allRowsButton.setText("All rows (" + allRows.size() + ")");
+        selectedRowsButton.setText("Selected rows (" + selectedRows.size() + ")");
+        javax.swing.ButtonGroup scope = new javax.swing.ButtonGroup();
+        scope.add(allRowsButton);
+        scope.add(selectedRowsButton);
+        // A partial selection most likely means "export these"; otherwise everything.
+        boolean partial = !selectedRows.isEmpty() && selectedRows.size() < allRows.size();
+        selectedRowsButton.setEnabled(!selectedRows.isEmpty());
+        (partial ? selectedRowsButton : allRowsButton).setSelected(true);
+        allRowsButton.addActionListener(e -> refreshPreview());
+        selectedRowsButton.addActionListener(e -> refreshPreview());
 
         setTitle("Export Data");
         setOKButtonText("Export to File");
@@ -140,6 +160,15 @@ final class ExportDataDialog extends DialogWrapper {
         left.add(extractor, gbc);
 
         gbc.insets = JBUI.insetsBottom(4);
+        left.add(new JBLabel("Rows:"), gbc);
+        JPanel scopeRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        scopeRow.add(allRowsButton);
+        scopeRow.add(javax.swing.Box.createHorizontalStrut(JBUI.scale(12)));
+        scopeRow.add(selectedRowsButton);
+        gbc.insets = JBUI.insetsBottom(10);
+        left.add(scopeRow, gbc);
+
+        gbc.insets = JBUI.insetsBottom(4);
         left.add(transpose, gbc);
         gbc.insets = JBUI.insetsBottom(14);
         left.add(addDdl, gbc);
@@ -149,7 +178,7 @@ final class ExportDataDialog extends DialogWrapper {
         gbc.insets = JBUI.insetsBottom(8);
         left.add(outputFile, gbc);
 
-        if (result.truncated) {
+        if (result.truncated && allRowsButton.isSelected()) {
             JBLabel warning = new JBLabel("Only the first " + SqlResult.MAX_ROWS
                     + " fetched rows are exported.", AllIcons.General.Warning, JBLabel.LEFT);
             warning.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
@@ -218,13 +247,19 @@ final class ExportDataDialog extends DialogWrapper {
         return new ResultExporter.Options(transposed, definition);
     }
 
+    /** The rows the export covers, in display order. */
+    private @NotNull List<Object[]> rows() {
+        return selectedRowsButton.isSelected() ? selectedRows : allRows;
+    }
+
     private @NotNull String render(@NotNull List<Object[]> rows) {
         String text = ResultExporter.export(format(), result.columns, rows, insertTarget, options());
         return StringUtil.convertLineSeparators(text); // documents only accept \n
     }
 
     private void refreshPreview() {
-        String text = render(result.rows.subList(0, Math.min(PREVIEW_ROWS, result.rows.size())));
+        List<Object[]> rows = rows();
+        String text = render(rows.subList(0, Math.min(PREVIEW_ROWS, rows.size())));
         CommandProcessor.getInstance().runUndoTransparentAction(() ->
                 WriteAction.run(() -> previewDocument.setText(text)));
         preview.getScrollingModel().scrollVertically(0);
@@ -299,7 +334,7 @@ final class ExportDataDialog extends DialogWrapper {
     protected void doOKAction() {
         Path target = Path.of(outputFile.getText().trim()).toAbsolutePath();
         try {
-            Files.writeString(target, render(result.rows), StandardCharsets.UTF_8);
+            Files.writeString(target, render(rows()), StandardCharsets.UTF_8);
         } catch (IOException e) {
             setErrorText("Export failed: " + e.getMessage(), outputFile.getTextField());
             return;
@@ -307,7 +342,7 @@ final class ExportDataDialog extends DialogWrapper {
         if (target.getParent() != null) {
             PropertiesComponent.getInstance().setValue(DIRECTORY_KEY, target.getParent().toString());
         }
-        notify(result.rows.size() + " row(s) exported to " + target);
+        notify(rows().size() + " row(s) exported to " + target);
         super.doOKAction();
     }
 
@@ -323,8 +358,8 @@ final class ExportDataDialog extends DialogWrapper {
 
         @Override
         public void actionPerformed(ActionEvent e) {
-            CopyPasteManager.getInstance().setContents(new StringSelection(render(result.rows)));
-            ExportDataDialog.this.notify(result.rows.size() + " row(s) copied to the clipboard as " + format().label);
+            CopyPasteManager.getInstance().setContents(new StringSelection(render(rows())));
+            ExportDataDialog.this.notify(rows().size() + " row(s) copied to the clipboard as " + format().label);
             close(CANCEL_EXIT_CODE);
         }
     }

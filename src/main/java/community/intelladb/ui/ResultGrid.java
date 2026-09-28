@@ -35,8 +35,9 @@ import java.util.Set;
  * Data grid in the style of IntelliJ's database results: a frozen row-number gutter,
  * column headers with a column icon (type in the tooltip), {@code <null>} in grey
  * italics, right-aligned numbers, the editor font, click-to-sort headers and cell
- * selection (Ctrl/Cmd+C copies the selected cells as TSV). Double-click opens the full
- * value.
+ * selection (Ctrl/Cmd+C copies the selected cells as TSV). Clicking row numbers selects
+ * whole rows (Shift+click for a range, Cmd/Ctrl+click to toggle). Double-click opens the
+ * full value.
  */
 final class ResultGrid extends JBTable {
 
@@ -63,6 +64,7 @@ final class ResultGrid extends JBTable {
         getEmptyText().setText("No rows");
         setDefaultRenderer(Object.class, new CellRenderer());
         applyEditorFont();
+        getSelectionModel().addListSelectionListener(e -> rowHeader.repaint());
         addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(@NotNull MouseEvent e) {
@@ -95,6 +97,41 @@ final class ResultGrid extends JBTable {
         installHeaderRenderer();
         fitColumns();
         rowHeader.refresh();
+    }
+
+    // ------------------------------------------------------------------ row access
+
+    /** All rows in the order shown (after sorting). */
+    @NotNull List<Object[]> rowsInViewOrder() {
+        List<Object[]> rows = new java.util.ArrayList<>(getRowCount());
+        for (int view = 0; view < getRowCount(); view++) {
+            rows.add(model.rows.get(convertRowIndexToModel(view)));
+        }
+        return rows;
+    }
+
+    /** Rows touched by the selection (any selected cell counts), in the order shown. */
+    @NotNull List<Object[]> selectedRowsInViewOrder() {
+        int[] selected = getSelectedRows();
+        java.util.Arrays.sort(selected);
+        List<Object[]> rows = new java.util.ArrayList<>(selected.length);
+        for (int view : selected) {
+            rows.add(model.rows.get(convertRowIndexToModel(view)));
+        }
+        return rows;
+    }
+
+    /** Selects whole rows {@code from..to} (view indices, any order), optionally adding to the selection. */
+    private void selectRows(int from, int to, boolean add) {
+        if (getColumnCount() == 0) {
+            return;
+        }
+        if (add) {
+            addRowSelectionInterval(from, to);
+        } else {
+            setRowSelectionInterval(from, to);
+        }
+        setColumnSelectionInterval(0, getColumnCount() - 1);
     }
 
     // ------------------------------------------------------------------ rendering
@@ -278,6 +315,39 @@ final class ResultGrid extends JBTable {
             setFocusable(false);
             setRowSelectionAllowed(false);
             setShowGrid(false);
+            MouseAdapter rowPicker = new MouseAdapter() {
+                private int anchor = -1;
+
+                @Override
+                public void mousePressed(@NotNull MouseEvent e) {
+                    int row = rowAtPoint(e.getPoint());
+                    if (row < 0) {
+                        return;
+                    }
+                    ResultGrid grid = ResultGrid.this;
+                    boolean toggle = e.isMetaDown() || e.isControlDown();
+                    if (e.isShiftDown() && anchor >= 0) {
+                        grid.selectRows(anchor, row, false);
+                    } else if (toggle && grid.isRowSelected(row)) {
+                        grid.removeRowSelectionInterval(row, row);
+                        anchor = row;
+                    } else {
+                        grid.selectRows(row, row, toggle);
+                        anchor = row;
+                    }
+                    grid.requestFocusInWindow(); // so Ctrl/Cmd+C copies the rows
+                }
+
+                @Override
+                public void mouseDragged(@NotNull MouseEvent e) {
+                    int row = rowAtPoint(e.getPoint());
+                    if (row >= 0 && anchor >= 0) {
+                        ResultGrid.this.selectRows(anchor, row, false);
+                    }
+                }
+            };
+            addMouseListener(rowPicker);
+            addMouseMotionListener(rowPicker);
             setDefaultRenderer(Object.class, new ColoredTableCellRenderer() {
                 @Override
                 protected void customizeCellRenderer(@NotNull JTable table, @Nullable Object value,
@@ -285,7 +355,13 @@ final class ResultGrid extends JBTable {
                     setFont(table.getFont());
                     setTextAlign(SwingConstants.LEFT);
                     setBorder(JBUI.Borders.empty(0, 6));
-                    append(String.valueOf(value), SimpleTextAttributes.GRAYED_ATTRIBUTES);
+                    boolean rowSelected = ResultGrid.this.isRowSelected(row);
+                    if (rowSelected) {
+                        setBackground(ResultGrid.this.getSelectionBackground());
+                    }
+                    append(String.valueOf(value), rowSelected
+                            ? new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, ResultGrid.this.getSelectionForeground())
+                            : SimpleTextAttributes.GRAYED_ATTRIBUTES);
                 }
             });
         }
