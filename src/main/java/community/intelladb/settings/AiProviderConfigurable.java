@@ -74,11 +74,23 @@ public final class AiProviderConfigurable implements Configurable {
 
         presetCombo.addItemListener(e -> {
             if (e.getStateChange() == ItemEvent.SELECTED && presetCombo.getSelectedItem() instanceof AiPreset preset) {
-                baseUrl.setText(preset.baseUrl());
-                applyModelChoices(preset);
-                applySamplingDefaults(preset);
+                loadProvider(preset);
             }
         });
+        javax.swing.JButton removeKey = new javax.swing.JButton("Remove Key");
+        removeKey.setToolTipText("Forget this provider's API key (it disappears from the AI Assistant's model picker)");
+        removeKey.addActionListener(e -> {
+            AiCredentials.write(shownPreset().id(), null);
+            apiKey.setText("");
+            refreshKeyHint(shownPreset());
+        });
+        JPanel keyRow = new JPanel(new BorderLayout(JBUI.scale(6), 0));
+        keyRow.add(apiKey, BorderLayout.CENTER);
+        keyRow.add(removeKey, BorderLayout.EAST);
+        JBLabel providerHint = new JBLabel("Each provider keeps its own key and settings. Every provider with a key "
+                + "is offered in the AI Assistant's model picker; Apply also makes the provider shown here active.");
+        providerHint.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
+        providerHint.setAllowAutoWrapping(true);
 
         JPanel testRow = new JPanel(new BorderLayout());
         testRow.add(testButton, BorderLayout.WEST);
@@ -87,9 +99,10 @@ public final class AiProviderConfigurable implements Configurable {
 
         return FormBuilder.createFormBuilder()
                 .setHorizontalGap(8)
-                .addLabeledComponent("Provider preset:", presetCombo)
+                .addLabeledComponent("Provider:", presetCombo)
+                .addComponent(providerHint, 2)
                 .addLabeledComponent("Base URL (OpenAI-compatible):", baseUrl)
-                .addLabeledComponent("API key:", apiKey)
+                .addLabeledComponent("API key:", keyRow)
                 .addComponent(new JBLabel("    Stored in the IDE secure credential store — never in project files."), 2)
                 .addLabeledComponent("Model:", model)
                 .addLabeledComponent("Temperature:", temperature)
@@ -130,31 +143,33 @@ public final class AiProviderConfigurable implements Configurable {
 
     @Override
     public boolean isModified() {
-        return !baseUrl.getText().equals(settings.baseUrl())
-                || !selectedModel().equals(settings.model())
-                || presetCombo.getSelectedIndex() != presetIndexOf(settings.presetId())
+        String id = shownPreset().id();
+        return !id.equals(settings.presetId()) // Apply makes the shown provider active
+                || !baseUrl.getText().trim().equals(settings.baseUrl(id))
+                || !selectedModel().equals(settings.model(id))
                 || !String.valueOf(apiKey.getPassword()).isBlank()
-                || ((Number) temperature.getValue()).doubleValue() != settings.temperature()
-                || ((Number) topP.getValue()).doubleValue() != settings.topP()
-                || ((Number) maxTokens.getValue()).intValue() != settings.maxTokens()
+                || ((Number) temperature.getValue()).doubleValue() != settings.temperature(id)
+                || ((Number) topP.getValue()).doubleValue() != settings.topP(id)
+                || ((Number) maxTokens.getValue()).intValue() != settings.maxTokens(id)
                 || includeSchema.isSelected() != settings.includeSchema();
     }
 
     @Override
     public void apply() {
-        AiPreset preset = (AiPreset) presetCombo.getSelectedItem();
+        AiPreset preset = shownPreset();
         String key = new String(apiKey.getPassword());
-        settings.set(preset != null ? preset.id() : AiPreset.CUSTOM.id(),
+        if (!key.isBlank()) {
+            AiCredentials.write(preset.id(), key);
+            apiKey.setText("");
+        }
+        settings.setIncludeSchema(includeSchema.isSelected());
+        settings.saveProvider(preset.id(),
                 baseUrl.getText().trim(),
                 selectedModel(),
                 ((Number) temperature.getValue()).doubleValue(),
                 ((Number) topP.getValue()).doubleValue(),
-                ((Number) maxTokens.getValue()).intValue(),
-                includeSchema.isSelected());
-        if (!key.isBlank()) {
-            AiCredentials.write(key);
-            apiKey.setText("");
-        }
+                ((Number) maxTokens.getValue()).intValue());
+        refreshKeyHint(preset);
         // Flush app-level state immediately so the provider config survives restarts
         // even when the IDE exits without a regular shutdown.
         com.intellij.openapi.application.ApplicationManager.getApplication().saveSettings();
@@ -162,34 +177,47 @@ public final class AiProviderConfigurable implements Configurable {
 
     @Override
     public void reset() {
-        AiPreset preset = AiPreset.byId(settings.presetId());
-        presetCombo.setSelectedItem(preset != null ? preset : AiPreset.CUSTOM);
-        baseUrl.setText(settings.baseUrl());
-        applyModelChoices(preset != null ? preset : AiPreset.CUSTOM);
-        selectModel(settings.model());
-        showSamplingLimits(preset != null ? preset : AiPreset.CUSTOM);
-        temperature.setValue(settings.temperature());
-        topP.setValue(settings.topP());
-        maxTokens.setValue(Math.min(settings.maxTokens(), maxTokensModel.getMaximum() instanceof Integer max
-                ? max : Integer.MAX_VALUE));
+        AiPreset active = settings.preset();
+        presetCombo.setSelectedItem(active); // fires loadProvider only when the selection changes
+        loadProvider(active);
         includeSchema.setSelected(settings.includeSchema());
-        // PasswordSafe must not be read on the EDT; refresh the hint asynchronously.
-        apiKey.getEmptyText().setText("Paste your API key");
-        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            boolean saved = AiCredentials.read() != null;
-            com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() ->
-                    apiKey.getEmptyText().setText(saved
-                            ? "A key is saved (leave empty to keep it)" : "Paste your API key"));
-        });
     }
 
-    /** Switching preset loads its recommended temperature / top_p / output budget. */
-    private void applySamplingDefaults(@NotNull AiPreset preset) {
-        AiPreset.Sampling sampling = preset.sampling();
+    private @NotNull AiPreset shownPreset() {
+        return presetCombo.getSelectedItem() instanceof AiPreset preset ? preset : AiPreset.CUSTOM;
+    }
+
+    /** Shows one provider's saved values (its recommended defaults until first saved). */
+    private void loadProvider(@NotNull AiPreset preset) {
+        String id = preset.id();
+        baseUrl.setText(settings.baseUrl(id));
+        applyModelChoices(preset);
+        selectModel(settings.model(id));
         showSamplingLimits(preset);
-        temperature.setValue(sampling.temperature());
-        topP.setValue(sampling.topP());
-        maxTokens.setValue(sampling.maxTokens());
+        temperature.setValue(settings.temperature(id));
+        topP.setValue(settings.topP(id));
+        maxTokens.setValue(Math.min(settings.maxTokens(id), preset.sampling().maxTokensLimit()));
+        apiKey.setText("");
+        refreshKeyHint(preset);
+    }
+
+    /** PasswordSafe must not be read on the EDT; the key hint updates asynchronously. */
+    private void refreshKeyHint(@NotNull AiPreset preset) {
+        if (!preset.needsApiKey()) {
+            apiKey.getEmptyText().setText("Not needed for a local provider");
+            return;
+        }
+        apiKey.getEmptyText().setText("Paste your API key");
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            boolean saved = AiCredentials.read(preset.id()) != null;
+            ApplicationManager.getApplication().invokeLater(() -> {
+                if (shownPreset() == preset) {
+                    apiKey.getEmptyText().setText(saved
+                            ? "A key is saved (leave empty to keep it)" : "Paste your API key");
+                    apiKey.repaint();
+                }
+            });
+        });
     }
 
     /** Output-token upper bound and the "recommended" hint for the preset. */
@@ -225,15 +253,5 @@ public final class AiProviderConfigurable implements Configurable {
     private @NotNull String selectedModel() {
         Object item = model.getEditor().getItem();
         return item == null ? "" : String.valueOf(item).trim();
-    }
-
-    private static int presetIndexOf(@NotNull String id) {
-        AiPreset[] all = AiPreset.ALL;
-        for (int i = 0; i < all.length; i++) {
-            if (all[i].id().equals(id)) {
-                return i;
-            }
-        }
-        return -1;
     }
 }

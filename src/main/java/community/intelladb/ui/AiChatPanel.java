@@ -360,7 +360,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
         double temperature = settings.temperature();
         double topP = settings.topP();
         int maxTokens = settings.maxTokens();
-        boolean localProvider = settings.presetId().equals("ollama") || settings.presetId().equals("lmstudio");
+        boolean localProvider = !settings.preset().needsApiKey();
 
         CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
             // PasswordSafe reads must stay off the EDT, and local providers must not
