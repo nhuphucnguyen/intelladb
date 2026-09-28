@@ -7,7 +7,10 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.ActionToolbar;
 import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
+import com.intellij.openapi.actionSystem.ex.ComboBoxAction;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorFontType;
@@ -15,6 +18,7 @@ import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.SimpleListCellRenderer;
@@ -28,6 +32,7 @@ import community.intelladb.IntellaDbIcons;
 import community.intelladb.ai.AiAssistant;
 import community.intelladb.ai.AiCredentials;
 import community.intelladb.ai.AiException;
+import community.intelladb.ai.AiPreset;
 import community.intelladb.ai.AiSettings;
 import community.intelladb.ai.ChatMessage;
 import community.intelladb.ai.MarkdownToHtml;
@@ -87,6 +92,10 @@ public final class AiChatPanel extends JPanel implements Disposable {
     private final Map<String, List<ChatMessage>> historyByConfig = new HashMap<>();
     private boolean updatingCombo;
     private boolean disposed;
+    /** Scope for listeners registered by this panel (dispose() is called directly, not via Disposer). */
+    private final Disposable listenerScope = Disposer.newDisposable("IntellaDb AI chat");
+    /** Providers the model picker offers; refreshed off the EDT (it reads the keychain). */
+    private volatile List<AiPreset> usableProviders = List.of();
     /** Bumped by New Chat; answers from an older generation are discarded. */
     private int chatGeneration;
 
@@ -111,6 +120,8 @@ public final class AiChatPanel extends JPanel implements Disposable {
         add(buildConnectionBar(), BorderLayout.NORTH);
 
         refreshConnections();
+        refreshProviders();
+        AiSettings.getInstance().addChangeListener(this::refreshProviders, listenerScope);
         // Keep the switcher in sync when connections are added/edited/deleted in DB Explorer.
         community.intelladb.connection.ConnectionManager.getInstance(project).addListener(() -> {
             if (!disposed) {
@@ -149,6 +160,8 @@ public final class AiChatPanel extends JPanel implements Disposable {
         // Header mirrors the Explorer tab: one toolbar row. The combo takes the free
         // width (shrinking in a narrow window); chat actions sit on the right.
         DefaultActionGroup group = new DefaultActionGroup();
+        group.add(new ModelPickerAction());
+        group.addSeparator();
         group.add(new DumbAwareAction("New Chat", "Clear the conversation and start over",
                 AllIcons.General.Add) {
             @Override
@@ -700,6 +713,84 @@ public final class AiChatPanel extends JPanel implements Disposable {
         return model.isBlank() ? "AI" : model;
     }
 
+    // ------------------------------------------------------------------ model picker
+
+    /**
+     * Re-reads which providers are usable (set up + key saved). If the active provider is
+     * no longer usable — e.g. its key was removed — the chat switches to the first usable one.
+     */
+    private void refreshProviders() {
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            List<AiPreset> usable = AiCredentials.usablePresets();
+            ApplicationManager.getApplication().invokeLater(() -> {
+                if (disposed) {
+                    return;
+                }
+                usableProviders = usable;
+                AiSettings settings = AiSettings.getInstance();
+                if (!usable.isEmpty() && !usable.contains(settings.preset())) {
+                    AiPreset first = usable.get(0);
+                    settings.setActive(first.id(), settings.model(first.id()));
+                }
+            });
+        });
+    }
+
+    /** "glm-5.3 ▾" next to the connection selector: models grouped by provider. */
+    private final class ModelPickerAction extends ComboBoxAction {
+        ModelPickerAction() {
+            setSmallVariant(true);
+        }
+
+        @Override
+        protected @NotNull DefaultActionGroup createPopupActionGroup(@NotNull JComponent button,
+                                                                     @NotNull DataContext context) {
+            AiSettings settings = AiSettings.getInstance();
+            DefaultActionGroup group = new DefaultActionGroup();
+            for (AiPreset provider : usableProviders) {
+                group.addSeparator(provider.label());
+                for (String model : settings.models(provider.id())) {
+                    boolean active = provider.id().equals(settings.presetId()) && model.equals(settings.model());
+                    group.add(new DumbAwareAction(model, provider.label() + " — " + model,
+                            active ? AllIcons.Actions.Checked : null) {
+                        @Override
+                        public void actionPerformed(@NotNull AnActionEvent e) {
+                            settings.setActive(provider.id(), model);
+                        }
+                    });
+                }
+            }
+            group.addSeparator();
+            group.add(new DumbAwareAction("Configure AI Providers…", "Add keys for more providers",
+                    AllIcons.General.Settings) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e) {
+                    ShowSettingsUtil.getInstance().showSettingsDialog(project, "community.intelladb.ai.provider");
+                }
+            });
+            return group;
+        }
+
+        @Override
+        public void update(@NotNull AnActionEvent e) {
+            AiSettings settings = AiSettings.getInstance();
+            List<AiPreset> usable = usableProviders;
+            if (usable.contains(settings.preset())) {
+                e.getPresentation().setText(settings.model());
+                e.getPresentation().setDescription("Model: " + settings.preset().label() + " — " + settings.model());
+            } else {
+                e.getPresentation().setText(usable.isEmpty() ? "No AI provider" : "Select model");
+                e.getPresentation().setDescription(usable.isEmpty()
+                        ? "Add an API key in Settings → Tools → Intella DB — AI Provider" : "Pick the model to chat with");
+            }
+        }
+
+        @Override
+        public @NotNull ActionUpdateThread getActionUpdateThread() {
+            return ActionUpdateThread.EDT;
+        }
+    }
+
     // ------------------------------------------------------------------ colors
     // Every color is resolved lazily from the current theme / editor scheme, so the chat
     // matches whatever LaF is active (and follows live theme switches) instead of
@@ -719,5 +810,6 @@ public final class AiChatPanel extends JPanel implements Disposable {
     @Override
     public void dispose() {
         disposed = true;
+        Disposer.dispose(listenerScope);
     }
 }
