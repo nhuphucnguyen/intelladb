@@ -2,9 +2,18 @@ package community.intelladb.ui;
 
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.BrowserUtil;
+import com.intellij.ide.ui.laf.darcula.ui.DarculaButtonUI;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.ActionToolbar;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.editor.colors.EditorColorsManager;
+import com.intellij.openapi.editor.colors.EditorFontType;
 import com.intellij.openapi.ide.CopyPasteManager;
+import com.intellij.openapi.options.ShowSettingsUtil;
+import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.ui.JBColor;
@@ -15,6 +24,7 @@ import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.components.JBTextArea;
 import com.intellij.util.ui.HTMLEditorKitBuilder;
 import com.intellij.util.ui.JBUI;
+import community.intelladb.IntellaDbIcons;
 import community.intelladb.ai.AiAssistant;
 import community.intelladb.ai.AiCredentials;
 import community.intelladb.ai.AiException;
@@ -29,7 +39,6 @@ import community.intelladb.connection.SqlResult;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JEditorPane;
@@ -43,7 +52,6 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
-import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
@@ -73,13 +81,14 @@ public final class AiChatPanel extends JPanel implements Disposable {
     private final SessionOpener opener;
     private final JPanel transcript = new JPanel(new GridBagLayout());
     private final JBScrollPane scrollPane;
-    private final JTextArea input = new JTextArea(2, 36);
+    private final JBTextArea input = new JBTextArea(2, 36);
     private final JButton sendButton = new JButton("Send");
-    private final JBLabel contextLabel = new JBLabel(" ");
     private final ComboBox<DbConfig> connectionCombo = new ComboBox<>();
     private final Map<String, List<ChatMessage>> historyByConfig = new HashMap<>();
     private boolean updatingCombo;
     private boolean disposed;
+    /** Bumped by New Chat; answers from an older generation are discarded. */
+    private int chatGeneration;
 
     @Nullable
     private CompletableFuture<?> pending;
@@ -109,11 +118,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
             }
         });
 
-        appendMessage(bubble("Intella DB AI",
-                body("Ask about your database in plain English — e.g. “Which customers ordered the most?”\n"
-                        + "Answers include a SQL block with a Run button; results appear right here in the chat.\n"
-                        + "Switch the connection any time using the selector above."),
-                false), false);
+        appendWelcome();
     }
 
     // ------------------------------------------------------------------ connection bar
@@ -123,43 +128,74 @@ public final class AiChatPanel extends JPanel implements Disposable {
             @Override
             public void customize(@NotNull javax.swing.JList<? extends DbConfig> list, DbConfig value,
                                   int index, boolean selected, boolean hasFocus) {
-                setText(value == null ? "No connections yet"
-                        : value.name + "  —  " + value.describe());
+                if (value == null) {
+                    setText("No connections — add one in the Explorer tab");
+                    setIcon(IntellaDbIcons.CONNECTION);
+                } else {
+                    setText(value.name + "  ·  " + value.describe());
+                    boolean connected = community.intelladb.connection.ConnectionManager.getInstance(project)
+                            .session(value.id) != null;
+                    setIcon(connected ? IntellaDbIcons.CONNECTION_CONNECTED : IntellaDbIcons.CONNECTION);
+                }
             }
         });
         connectionCombo.addActionListener(e -> {
             if (updatingCombo) {
                 return;
             }
-            Object selected = connectionCombo.getSelectedItem();
-            if (selected instanceof DbConfig config) {
-                setConnection(config);
+            input.requestFocusInWindow();
+        });
+        connectionCombo.setToolTipText("Connection the assistant answers about");
+        // Header mirrors the Explorer tab: one toolbar row. The combo takes the free
+        // width (shrinking in a narrow window); chat actions sit on the right.
+        DefaultActionGroup group = new DefaultActionGroup();
+        group.add(new DumbAwareAction("New Chat", "Clear the conversation and start over",
+                AllIcons.General.Add) {
+            @Override
+            public void actionPerformed(@NotNull AnActionEvent e) {
+                newChat();
             }
         });
-        // GridBag keeps the label fixed and lets the combo take the rest of the width,
-        // so a narrow tool window shrinks the combo instead of clipping/overlapping it.
-        JPanel bar = new JPanel(new GridBagLayout());
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridx = 0;
-        gbc.gridy = 0;
-        gbc.anchor = GridBagConstraints.WEST;
-        gbc.insets = new Insets(0, 8, 0, 8);
-        JBLabel label = new JBLabel("Connection:");
-        label.setForeground(SECONDARY_TEXT);
-        bar.add(label, gbc);
+        group.add(new DumbAwareAction("AI Provider Settings", "Configure the AI provider (provider, key, model)",
+                AllIcons.General.Settings) {
+            @Override
+            public void actionPerformed(@NotNull AnActionEvent e) {
+                ShowSettingsUtil.getInstance().showSettingsDialog(project, "community.intelladb.ai.provider");
+            }
+        });
+        ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar("IntellaDbAiChat", group, true);
+        toolbar.setTargetComponent(this);
 
-        gbc = new GridBagConstraints();
-        gbc.gridx = 1;
-        gbc.gridy = 0;
-        gbc.weightx = 1.0;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        gbc.insets = new Insets(4, 0, 4, 8);
-        bar.add(connectionCombo, gbc);
-
-        bar.setBorder(BorderFactory.createCompoundBorder(
-                JBUI.Borders.customLineBottom(JBColor.border()),
-                JBUI.Borders.empty(5, 0, 5, 0)));
+        JPanel bar = new JPanel(new BorderLayout(JBUI.scale(4), 0));
+        JPanel comboHost = new JPanel(new BorderLayout());
+        comboHost.setBorder(JBUI.Borders.empty(3, 6, 3, 0));
+        comboHost.add(connectionCombo, BorderLayout.CENTER);
+        bar.add(comboHost, BorderLayout.CENTER);
+        bar.add(toolbar.getComponent(), BorderLayout.EAST);
+        bar.setBorder(JBUI.Borders.customLineBottom(JBColor.border()));
         return bar;
+    }
+
+    /** Clears the transcript and every per-connection history, cancelling any request in flight. */
+    private void newChat() {
+        if (pending != null) {
+            pending.cancel(true);
+            pending = null;
+        }
+        thinkingRow = null;
+        chatGeneration++; // drop late callbacks from the previous conversation
+        historyByConfig.clear();
+        transcript.removeAll();
+        sendButton.setEnabled(true);
+        appendWelcome();
+        input.requestFocusInWindow();
+    }
+
+    private void appendWelcome() {
+        appendMessage(bubble(null,
+                body("Ask about your database in plain English — e.g. “Which customers ordered the most?”\n"
+                        + "Answers include a SQL block you can Run right here, or send to a console."),
+                false), false);
     }
 
     /** Reloads saved connections into the switcher, keeping the current selection when possible. */
@@ -182,11 +218,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
         } finally {
             updatingCombo = false;
         }
-        if (selectedConfig() == null && !configs.isEmpty()) {
-            setConnection(configs.get(0));
-        } else if (configs.isEmpty()) {
-            contextLabel.setText("Add a connection in the DB Explorer, then pick it here.");
-        }
+        connectionCombo.setEnabled(!configs.isEmpty());
     }
 
     // ------------------------------------------------------------------ layout helpers
@@ -216,21 +248,32 @@ public final class AiChatPanel extends JPanel implements Disposable {
     }
 
     private JComponent buildInputArea() {
-        JPanel south = new JPanel(new BorderLayout());
-
-        contextLabel.setBorder(JBUI.Borders.empty(4, 12, 0, 12));
-        contextLabel.setForeground(SECONDARY_TEXT);
-        south.add(contextLabel, BorderLayout.NORTH);
-
+        // Compose box: one bordered field (text + Send inside), like the platform's AI
+        // Assistant / commit message input, instead of a bare textarea beside a button.
         input.setLineWrap(true);
         input.setWrapStyleWord(true);
-        JPanel inputHost = new JPanel(new BorderLayout());
-        inputHost.setBorder(JBUI.Borders.empty(4, 8, 8, 8));
-        inputHost.add(new JScrollPane(input), BorderLayout.CENTER);
-        sendButton.setAlignmentY(Component.TOP_ALIGNMENT);
+        input.setBorder(JBUI.Borders.empty(6, 8));
+        input.getEmptyText().setText("Ask about your data…  (Enter to send, Shift+Enter for new line)");
+        JBScrollPane inputScroll = new JBScrollPane(input);
+        inputScroll.setBorder(JBUI.Borders.empty());
+
+        sendButton.putClientProperty(DarculaButtonUI.DEFAULT_STYLE_KEY, true); // accent-filled primary button
+        sendButton.setFocusable(false);
         sendButton.addActionListener(e -> send());
-        inputHost.add(sendButton, BorderLayout.EAST);
-        south.add(inputHost, BorderLayout.CENTER);
+        JPanel sendHost = new JPanel(new BorderLayout());
+        sendHost.setOpaque(false);
+        sendHost.setBorder(JBUI.Borders.empty(0, 0, 6, 6));
+        sendHost.add(sendButton, BorderLayout.SOUTH);
+
+        JPanel compose = new JPanel(new BorderLayout());
+        compose.setBackground(input.getBackground());
+        compose.setBorder(JBUI.Borders.customLine(JBColor.border()));
+        compose.add(inputScroll, BorderLayout.CENTER);
+        compose.add(sendHost, BorderLayout.EAST);
+
+        JPanel south = new JPanel(new BorderLayout());
+        south.setBorder(JBUI.Borders.empty(6, 8, 8, 8));
+        south.add(compose, BorderLayout.CENTER);
 
         // Enter sends; Shift+Enter (and any modified Enter) falls through to newline.
         input.getInputMap(javax.swing.JComponent.WHEN_FOCUSED)
@@ -246,8 +289,14 @@ public final class AiChatPanel extends JPanel implements Disposable {
 
     // ------------------------------------------------------------------ public API
 
+    /** Points the chat at the given connection (selects it in the header switcher). */
     public void setConnection(@NotNull DbConfig config) {
-        contextLabel.setText("Asking about: " + config.name + " (" + config.describe() + ")");
+        for (int i = 0; i < connectionCombo.getItemCount(); i++) {
+            if (connectionCombo.getItemAt(i).id.equals(config.id)) {
+                connectionCombo.setSelectedIndex(i);
+                return;
+            }
+        }
     }
 
     public void setDraft(@NotNull String text) {
@@ -284,14 +333,13 @@ public final class AiChatPanel extends JPanel implements Disposable {
         }
         DbConfig current = selectedConfig();
         if (current == null) {
-            appendMessage(bubble("Intella DB AI",
-                    errorBody("Add a connection in the DB Explorer, then pick it in the selector above."), false), false);
+            appendMessage(bubble(null,
+                    errorBody("Add a connection in the Explorer tab, then pick it in the selector above."), false), false);
             return;
         }
-        setConnection(current);
         input.setText("");
         sendButton.setEnabled(false);
-        appendMessage(bubble("You", body(question, 56), true), true);
+        appendMessage(bubble(null, body(question, 56), true), true);
         // Connects (with password prompt) when needed, then continues on the EDT.
         // The provider pre-check runs inside doSend's background path (PasswordSafe
         // must not be read on the EDT).
@@ -328,7 +376,11 @@ public final class AiChatPanel extends JPanel implements Disposable {
             return client.chat(messages);
         });
         pending = future;
+        int generation = chatGeneration;
         future.whenComplete((answer, error) -> ApplicationManager.getApplication().invokeLater(() -> {
+            if (disposed || generation != chatGeneration) {
+                return; // New Chat already reset the transcript
+            }
             if (pending == future) {
                 pending = null;
             }
@@ -338,8 +390,10 @@ public final class AiChatPanel extends JPanel implements Disposable {
                 Throwable cause = error.getCause() != null ? error.getCause() : error;
                 String message = cause instanceof AiException aiError
                         ? aiError.getMessage()
+                        : cause instanceof java.util.concurrent.CancellationException
+                        ? "Cancelled."
                         : "AI request failed: " + cause.getMessage();
-                appendMessage(bubble("Intella DB AI", errorBody(message), false), false);
+                appendMessage(bubble(null, errorBody(message), false), false);
             } else {
                 String sql = AiAssistant.firstSqlBlock(answer);
                 JPanel answerRow = assistantAnswerRow(answer, sql, current);
@@ -366,7 +420,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
             }
         });
         body.add(cancel, BorderLayout.EAST);
-        thinkingRow = bubble("Intella DB AI", body, false);
+        thinkingRow = bubble(settingsLabel(), body, false);
         appendMessage(thinkingRow, false);
     }
 
@@ -410,7 +464,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
                 stack.add(markdownBody(after));
             }
         }
-        return bubble("Intella DB AI (" + settingsLabel() + ")", stack, false);
+        return bubble(settingsLabel(), stack, false);
     }
 
     /** Renders an answer (or its prose parts) as markdown: paragraphs, lists, code fences. */
@@ -510,31 +564,42 @@ public final class AiChatPanel extends JPanel implements Disposable {
 
     // ------------------------------------------------------------------ bubble building
 
-    private @NotNull JPanel bubble(@NotNull String title, @NotNull JComponent body, boolean user) {
-        JPanel panel = new BubblePanel(user);
-        JBLabel header = new JBLabel(title);
-        header.setFont(header.getFont().deriveFont(Font.BOLD, header.getFont().getSize2D() - 1f));
+    /**
+     * A transcript row. User messages are a compact filled pill hugging the right edge;
+     * assistant rows (answers, errors, results) are flat, full-width, under a small
+     * icon + label header — the way the platform's own AI chat reads, and the prose
+     * gets the whole width instead of sitting in a second box.
+     */
+    private @NotNull JPanel bubble(@Nullable String title, @NotNull JComponent body, boolean user) {
+        if (user) {
+            JPanel panel = new BubblePanel();
+            panel.add(body, BorderLayout.CENTER);
+            return panel;
+        }
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setOpaque(false);
+        panel.setBorder(JBUI.Borders.empty(2, 6, 6, 6));
+        boolean result = "Query result".equals(title);
+        JBLabel header = new JBLabel(title == null ? "Assistant" : title,
+                result ? IntellaDbIcons.TABLE : IntellaDbIcons.AI, javax.swing.SwingConstants.LEFT);
+        header.setFont(JBUI.Fonts.smallFont());
         header.setForeground(SECONDARY_TEXT);
-        header.setBorder(JBUI.Borders.emptyBottom(4));
+        header.setIconTextGap(JBUI.scale(5));
+        header.setBorder(JBUI.Borders.emptyBottom(5));
         panel.add(header, BorderLayout.NORTH);
         panel.add(body, BorderLayout.CENTER);
         return panel;
     }
 
     /**
-     * Rounded, antialiased bubble. Fills its own background in paintComponent so the
-     * corners stay transparent instead of showing a square fill behind the rounded border.
+     * Rounded, antialiased pill for user messages. Fills its own background in
+     * paintComponent so the corners stay transparent instead of showing a square fill.
      */
     private static final class BubblePanel extends JPanel {
-        private final Color fill;
-        private final Color outline;
-
-        BubblePanel(boolean user) {
+        BubblePanel() {
             super(new BorderLayout());
-            this.fill = user ? USER_BUBBLE : AI_BUBBLE;
-            this.outline = user ? USER_BUBBLE_BORDER : BUBBLE_BORDER;
             setOpaque(false);
-            setBorder(JBUI.Borders.empty(8, 12, 9, 12));
+            setBorder(JBUI.Borders.empty(7, 12, 8, 12));
         }
 
         @Override
@@ -543,12 +608,9 @@ public final class AiChatPanel extends JPanel implements Disposable {
             try {
                 gr.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                         RenderingHints.VALUE_ANTIALIAS_ON);
-                int w = getWidth() - 1;
-                int h = getHeight() - 1;
-                gr.setColor(fill);
-                gr.fillRoundRect(0, 0, w, h, 14, 14);
-                gr.setColor(outline);
-                gr.drawRoundRect(0, 0, w, h, 14, 14);
+                int arc = JBUI.scale(16);
+                gr.setColor(USER_BUBBLE);
+                gr.fillRoundRect(0, 0, getWidth(), getHeight(), arc, arc);
             } finally {
                 gr.dispose();
             }
@@ -602,12 +664,13 @@ public final class AiChatPanel extends JPanel implements Disposable {
 
     private @NotNull JComponent sqlBlock(@NotNull String sql) {
         JTextArea area = new JTextArea(sql);
-        area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, area.getFont().getSize()));
+        // Editor font + editor background: SQL reads like code from the user's own scheme.
+        area.setFont(EditorColorsManager.getInstance().getGlobalScheme().getFont(EditorFontType.PLAIN));
         area.setEditable(false);
         area.setFocusable(false);
         area.setLineWrap(false);
         area.setBackground(SQL_BLOCK);
-        area.setBorder(JBUI.Borders.empty(4, 6));
+        area.setBorder(JBUI.Borders.empty(6, 8));
         long lines = sql.lines().count();
         int maxLen = sql.lines().mapToInt(String::length).max().orElse(40);
         int rows = (int) Math.min(10, Math.max(2, lines));
@@ -619,7 +682,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
         area.setRows(rows);
         area.setColumns(columns);
         JScrollPane scroller = new JScrollPane(area);
-        scroller.setBorder(BorderFactory.createLineBorder(BUBBLE_BORDER));
+        scroller.setBorder(JBUI.Borders.customLine(JBColor.border()));
         Dimension size = new Dimension(bubbleTextWidth(), area.getPreferredSize().height + 12);
         scroller.setPreferredSize(size);
         // GridBag compresses rows down to their minimum when the transcript slightly
@@ -634,30 +697,20 @@ public final class AiChatPanel extends JPanel implements Disposable {
     }
 
     // ------------------------------------------------------------------ colors
-    // Dark-theme values are chosen against the 2026.x dark panel (#2B2D30): the assistant
-    // bubble must sit clearly above it, and the user bubble gets an accent-blue tint.
+    // Every color is resolved lazily from the current theme / editor scheme, so the chat
+    // matches whatever LaF is active (and follows live theme switches) instead of
+    // hardcoding one light and one dark palette. Themes can still override via IntellaDb.*.
 
-    private static final com.intellij.ui.JBColor USER_BUBBLE =
-            com.intellij.ui.JBColor.namedColor("IntellaDb.userBubble",
-                    com.intellij.ui.JBColor.isBright() ? new Color(0xDCEBFB) : new Color(0x2F4B72));
-    private static final com.intellij.ui.JBColor USER_BUBBLE_BORDER =
-            com.intellij.ui.JBColor.namedColor("IntellaDb.userBubbleBorder",
-                    com.intellij.ui.JBColor.isBright() ? new Color(0xAECBEF) : new Color(0x476B99));
-    private static final com.intellij.ui.JBColor AI_BUBBLE =
-            com.intellij.ui.JBColor.namedColor("IntellaDb.aiBubble",
-                    com.intellij.ui.JBColor.isBright() ? new Color(0xFFFFFF) : new Color(0x3C4048));
-    private static final com.intellij.ui.JBColor BUBBLE_BORDER =
-            com.intellij.ui.JBColor.namedColor("IntellaDb.border",
-                    com.intellij.ui.JBColor.isBright() ? new Color(0xD5D9DF) : new Color(0x565A63));
-    private static final com.intellij.ui.JBColor SECONDARY_TEXT =
-            com.intellij.ui.JBColor.namedColor("IntellaDb.secondaryText",
-                    com.intellij.ui.JBColor.isBright() ? new Color(0x5E6470) : new Color(0xA6ACB8));
-    private static final com.intellij.ui.JBColor SQL_BLOCK =
-            com.intellij.ui.JBColor.namedColor("IntellaDb.sqlBlock",
-                    com.intellij.ui.JBColor.isBright() ? new Color(0xF2F4F7) : new Color(0x1E1F22));
-    private static final com.intellij.ui.JBColor ERROR_TEXT =
-            com.intellij.ui.JBColor.namedColor("IntellaDb.errorText",
-                    com.intellij.ui.JBColor.isBright() ? new Color(0xCC3D4C) : new Color(0xF2687A));
+    /** Neutral pill: the platform's inactive-selection color. */
+    private static final JBColor USER_BUBBLE = JBColor.namedColor("IntellaDb.userBubble",
+            JBColor.lazy(() -> JBUI.CurrentTheme.List.Selection.background(false)));
+    private static final JBColor SECONDARY_TEXT = JBColor.namedColor("IntellaDb.secondaryText",
+            JBUI.CurrentTheme.ContextHelp.FOREGROUND);
+    /** SQL blocks sit on the editor background, like code in the editor. */
+    private static final JBColor SQL_BLOCK = JBColor.namedColor("IntellaDb.sqlBlock",
+            JBColor.lazy(() -> EditorColorsManager.getInstance().getGlobalScheme().getDefaultBackground()));
+    private static final JBColor ERROR_TEXT = JBColor.namedColor("Label.errorForeground",
+            new JBColor(new Color(0xC7222D), new Color(0xFF5261)));
 
     @Override
     public void dispose() {

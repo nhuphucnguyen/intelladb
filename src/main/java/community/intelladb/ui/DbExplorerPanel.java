@@ -13,11 +13,8 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.SimpleToolWindowPanel;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.ui.JBSplitter;
-import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBScrollPane;
-import com.intellij.ui.components.JBTabbedPane;
-import community.intelladb.IntellaDbIcons;
+import com.intellij.util.ui.JBUI;
 import community.intelladb.connection.ConnectionManager;
 import community.intelladb.connection.DbConfig;
 import community.intelladb.connection.DbSession;
@@ -25,60 +22,36 @@ import community.intelladb.schema.TableMeta;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.BorderFactory;
-import javax.swing.SwingConstants;
-import java.awt.BorderLayout;
 import java.util.function.Consumer;
 
 /**
- * Main "DB Explorer" panel: connection tree on the left, work tabs (SQL console,
- * table data, AI assistant) on the right.
+ * "Explorer" tab of the DB Explorer tool window: the connection tree, full width, with
+ * database actions only. The AI chat is a sibling tab of the tool window (not a split
+ * inside this panel); consoles and data grids open as editor tabs.
  */
 public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disposable {
 
     private final Project project;
     private final ConnectionManager manager;
     private final ConnectionTreePanel treePanel;
-    private JBTabbedPane tabs;
-    private AiChatPanel aiPanel;
+    /** Owned here so its lifetime follows the explorer; shown as its own tool-window tab. */
+    private final AiChatPanel aiPanel;
 
     public DbExplorerPanel(@NotNull Project project) {
         super(true, true);
         this.project = project;
         this.manager = ConnectionManager.getInstance(project);
         this.treePanel = new ConnectionTreePanel(project, this);
+        this.aiPanel = new AiChatPanel(project);
 
         setToolbar(createToolbar().getComponent());
 
-        JBSplitter splitter = new JBSplitter(false, 0.32f);
-        splitter.setFirstComponent(new JBScrollPane(treePanel.tree()));
-        splitter.setSecondComponent(buildRightPane());
-        setContent(splitter);
-
-        openAiAssistant(); // the chat is a first-class tab, present from the start
+        JBScrollPane treeScroll = new JBScrollPane(treePanel.tree());
+        treeScroll.setBorder(JBUI.Borders.empty());
+        setContent(treeScroll);
 
         manager.addListener(this::refreshTree);
         Disposer.register(this, treePanel);
-    }
-
-    private javax.swing.JComponent buildRightPane() {
-        tabs = new JBTabbedPane(SwingConstants.TOP);
-        tabs.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
-        tabs.addMouseListener(new java.awt.event.MouseAdapter() {
-            @Override
-            public void mouseClicked(@NotNull java.awt.event.MouseEvent e) {
-                // middle-click closes the tab under the pointer, like editor tabs
-                if (e.getButton() == java.awt.event.MouseEvent.BUTTON2) {
-                    int index = tabs.indexAtLocation(e.getX(), e.getY());
-                    if (index >= 0) {
-                        closeTab(tabs.getComponentAt(index));
-                    }
-                }
-            }
-        });
-        javax.swing.JPanel right = new javax.swing.JPanel(new BorderLayout());
-        right.add(tabs, BorderLayout.CENTER);
-        return right;
     }
 
     private ActionToolbar createToolbar() {
@@ -179,21 +152,7 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
                 e.getPresentation().setEnabled(treePanel.selectedTable() != null);
             }
         });
-        group.addSeparator();
-        group.add(new AnAction("AI Assistant", "Open the AI chat tab", IntellaDbIcons.AI) {
-            @Override
-            public void actionPerformed(@NotNull AnActionEvent e) {
-                openAiAssistant();
-            }
-        });
-        group.add(new AnAction("AI Provider Settings", "Configure the AI provider (provider, key, model)",
-                AllIcons.General.Settings) {
-            @Override
-            public void actionPerformed(@NotNull AnActionEvent e) {
-                com.intellij.openapi.options.ShowSettingsUtil.getInstance()
-                        .showSettingsDialog(project, "community.intelladb.ai.provider");
-            }
-        });
+        // AI actions (new chat, provider settings) live in the AI Assistant tab's own toolbar.
         ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar("IntellaDbExplorer", group, true);
         toolbar.setTargetComponent(this);
         return toolbar;
@@ -233,55 +192,22 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         return console;
     }
 
-    /**
-     * Adds a tab whose header carries a close (×) button — without it the work tabs
-     * could never be closed. The header draws no background of its own: the tabbed
-     * pane's own selected-tab highlight marks the active tab (a custom pill painted
-     * here was smaller than the platform's tab rect, so a stray "chip" peeked out
-     * around every tab).
-     */
-    private void addClosableTab(@NotNull String title, @NotNull javax.swing.Icon icon,
-                                @NotNull javax.swing.JComponent component) {
-        tabs.addTab(title, icon, component);
-        javax.swing.JPanel header = new javax.swing.JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
-        header.setOpaque(false);
-        header.setToolTipText("Middle-click closes the tab");
-        header.addMouseListener(new java.awt.event.MouseAdapter() {
-            @Override
-            public void mouseClicked(@NotNull java.awt.event.MouseEvent e) {
-                // middle-click closes the tab, any other click selects it
-                if (e.getButton() == java.awt.event.MouseEvent.BUTTON2) {
-                    closeTab(component);
-                } else {
-                    tabs.setSelectedComponent(component);
-                }
-            }
-        });
-        header.add(new JBLabel(title, icon, javax.swing.SwingConstants.LEFT));
-        javax.swing.JButton close = new javax.swing.JButton(AllIcons.Actions.Close);
-        close.setBorder(com.intellij.util.ui.JBUI.Borders.empty(2, 4));
-        close.setContentAreaFilled(false);
-        close.setFocusable(false);
-        close.setToolTipText("Close tab (middle-click also works)");
-        close.addActionListener(e -> closeTab(component));
-        header.add(close);
-        tabs.setTabComponentAt(tabs.indexOfComponent(component), header);
-    }
-
-    /**
-     * Opens (or focuses) the AI chat as a work tab inside this explorer. The panel lives
-     * for as long as its tab; closing the tab disposes it (chat history resets).
-     */
+    /** Selects the AI Assistant tab of the tool window (the chat itself always exists). */
     public void openAiAssistant() {
-        if (aiPanel == null) {
-            aiPanel = new AiChatPanel(project);
-            addClosableTab("AI Assistant", IntellaDbIcons.AI, aiPanel);
+        var toolWindow = com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
+                .getToolWindow(DbToolWindowFactory.TOOL_WINDOW_ID);
+        if (toolWindow == null) {
+            return;
         }
-        tabs.setSelectedComponent(aiPanel);
+        var contents = toolWindow.getContentManager();
+        for (var content : contents.getContents()) {
+            if (content.getComponent() == aiPanel) {
+                contents.setSelectedContent(content, true);
+            }
+        }
     }
 
-    /** The AI chat panel, or null until {@link #openAiAssistant()} first ran. */
-    public @Nullable AiChatPanel aiPanel() {
+    public @NotNull AiChatPanel aiPanel() {
         return aiPanel;
     }
 
@@ -294,21 +220,6 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         IntellaDbFileEditorProvider.attach(file, () -> panel);
         com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).openFile(file, true);
         table.showIn(this, panel);
-    }
-
-    /** Closes the given (or the selected) tab. */
-    public void closeTab(@Nullable java.awt.Component component) {
-        int index = component != null ? tabs.indexOfComponent(component) : tabs.getSelectedIndex();
-        if (index >= 0) {
-            java.awt.Component removed = tabs.getComponentAt(index);
-            tabs.removeTabAt(index);
-            if (removed == aiPanel) {
-                aiPanel.dispose(); // idempotent; closing the tab resets the chat
-                aiPanel = null;
-            } else if (removed instanceof com.intellij.openapi.Disposable disposable) {
-                com.intellij.openapi.util.Disposer.dispose(disposable);
-            }
-        }
     }
 
     // ------------------------------------------------------------------ helpers for children
@@ -347,9 +258,7 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
 
     @Override
     public void dispose() {
-        if (aiPanel != null) {
-            aiPanel.dispose(); // idempotent; skipped when the tab was already closed
-        }
+        aiPanel.dispose();
         manager.disconnectAll();
     }
 }

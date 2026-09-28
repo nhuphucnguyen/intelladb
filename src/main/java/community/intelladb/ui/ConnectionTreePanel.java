@@ -485,17 +485,18 @@ public final class ConnectionTreePanel implements Disposable {
                     String name = config.name.isEmpty() ? config.describe() : config.name;
                     plain.append(name);
                     append(name, SimpleTextAttributes.REGULAR_ATTRIBUTES);
-                    String suffix = "  —  " + config.describe();
+                    // Connected state is carried by the icon's green dot; the suffix only
+                    // calls out transitional/failed states and otherwise shows the target.
+                    String suffix = "  " + config.describe();
                     if ("connecting".equals(state)) {
-                        suffix = "  —  connecting…";
+                        suffix = "  connecting…";
                     } else if (state != null && state.startsWith("error:")) {
-                        suffix = "  —  failed";
-                    } else if (connected) {
-                        suffix = "  —  connected";
+                        suffix = "  failed";
                     }
                     plain.append(suffix);
-                    append(suffix, SimpleTextAttributes.GRAYED_ATTRIBUTES);
-                    setIcon(IntellaDbIcons.CONNECTION);
+                    append(suffix, state != null && state.startsWith("error:")
+                            ? SimpleTextAttributes.ERROR_ATTRIBUTES : SimpleTextAttributes.GRAYED_ATTRIBUTES);
+                    setIcon(connected ? IntellaDbIcons.CONNECTION_CONNECTED : IntellaDbIcons.CONNECTION);
                 }
                 case SchemaEntry s -> {
                     plain.append(s.name());

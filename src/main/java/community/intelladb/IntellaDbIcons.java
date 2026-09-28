@@ -7,7 +7,7 @@ import javax.swing.Icon;
 public final class IntellaDbIcons {
     public static final Icon TOOL_WINDOW = IconLoader.getIcon("/icons/dbToolWindow.svg", IntellaDbIcons.class);
     public static final Icon CONNECTION = IconLoader.getIcon("/icons/dbConnection.svg", IntellaDbIcons.class);
-    public static final Icon CONNECTION_CONNECTED = IconLoader.getIcon("/icons/dbConnection.svg", IntellaDbIcons.class);
+    public static final Icon CONNECTION_CONNECTED = IconLoader.getIcon("/icons/dbConnectionConnected.svg", IntellaDbIcons.class);
     public static final Icon SCHEMA = IconLoader.getIcon("/icons/dbSchema.svg", IntellaDbIcons.class);
     public static final Icon TABLE = IconLoader.getIcon("/icons/dbTable.svg", IntellaDbIcons.class);
     public static final Icon VIEW = IconLoader.getIcon("/icons/dbView.svg", IntellaDbIcons.class);
