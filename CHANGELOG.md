@@ -3,10 +3,19 @@
 ## 0.2.0
 
 ### Added
+- **Cell value viewer**: double-click any cell in a results grid (console, View Data,
+  AI chat results) to see the full value in a dialog with a Copy button. JSON and
+  JSONB values are automatically pretty-printed.
 - **Markdown rendering in AI answers**: headings, **bold**, *italic*, `inline code`,
   links (clickable), bullet lists and extra fenced code blocks now display properly
   instead of showing raw markdown syntax. The first SQL block keeps its Run /
   Insert into Console / Copy buttons.
+
+### Fixed
+- **"Insert into Console" from the AI chat did nothing**: the document change was made
+  in a bare write action, which the platform rejects outside a command
+  (IncorrectOperationException) — it now runs in a WriteCommandAction and the SQL lands
+  in the console.
 
 ### Improved
 - The password prompt (shown only when a connection has no stored credential) now offers

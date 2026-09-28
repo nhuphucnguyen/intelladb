@@ -45,7 +45,7 @@ public final class ConsolePanel extends JPanel {
     private final DbExplorerPanel explorer;
     private final DbConfig config;
     private final EditorTextField editor;
-    private final ResultsPanel results = new ResultsPanel();
+    private final ResultsPanel results;
     private final JBLabel status = new JBLabel(" ");
 
     public ConsolePanel(@NotNull Project project, @NotNull DbExplorerPanel explorer, @NotNull DbConfig config) {
@@ -53,6 +53,7 @@ public final class ConsolePanel extends JPanel {
         this.project = project;
         this.explorer = explorer;
         this.config = config;
+        this.results = new ResultsPanel(project);
 
         Document document = EditorFactory.getInstance().createDocument("-- SQL for " + config.describe() + "\n");
         document.putUserData(SqlColumnValueAid.CONSOLE_DOCUMENT, true);
@@ -89,8 +90,11 @@ public final class ConsolePanel extends JPanel {
     }
 
     public void setSql(@NotNull String sql) {
-        ApplicationManager.getApplication().runWriteAction(() ->
-                editor.getDocument().replaceString(0, editor.getDocument().getTextLength(), sql));
+        // Documents may only change inside a command (WriteCommandAction), not a bare
+        // write action — otherwise the platform throws IncorrectOperationException.
+        com.intellij.openapi.command.WriteCommandAction.runWriteCommandAction(project, () ->
+                ApplicationManager.getApplication().runWriteAction(() ->
+                        editor.getDocument().replaceString(0, editor.getDocument().getTextLength(), sql)));
     }
 
     public @NotNull String sql() {

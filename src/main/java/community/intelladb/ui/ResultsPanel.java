@@ -1,5 +1,6 @@
 package community.intelladb.ui;
 
+import com.intellij.openapi.project.Project;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.table.TableView;
 import com.intellij.util.ui.ColumnInfo;
@@ -14,24 +15,53 @@ import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 
 /** Reusable results grid (used by the console, table-data tabs and the AI panel). */
 public final class ResultsPanel extends JPanel {
 
+    private final Project project;
     private ListTableModel<Object[]> model = new ListTableModel<>();
     private final TableView<Object[]> table = new TableView<>(model);
     private final JBLabel info = new JBLabel("Run a query to see results here", SwingConstants.LEFT);
 
-    public ResultsPanel() {
+    public ResultsPanel(@NotNull Project project) {
         super(new BorderLayout());
+        this.project = project;
         table.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
         table.setShowGrid(true);
         table.getTableHeader().setReorderingAllowed(false);
+        table.setToolTipText("Double-click a cell to view the full value");
+        table.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(@NotNull MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    viewSelectedCell();
+                }
+            }
+        });
         info.setBorder(JBUI.Borders.empty(4, 8));
 
         add(new JScrollPane(table), BorderLayout.CENTER);
         add(info, BorderLayout.SOUTH);
+    }
+
+    /** Opens the full cell value; JSON is pretty-printed. */
+    private void viewSelectedCell() {
+        int row = table.getSelectedRow();
+        int column = table.getSelectedColumn();
+        if (row < 0 || column < 0 || row >= model.getRowCount() || column >= model.getColumnCount()) {
+            return;
+        }
+        Object[] rowData = model.getItem(row);
+        Object cell = rowData != null && rowData.length > column ? rowData[column] : null;
+        if (cell == null) {
+            return; // NULL has nothing more to show
+        }
+        String columnName = model.getColumnName(column);
+        new CellValueDialog(project, columnName, String.valueOf(cell)).show();
     }
 
     public void showRunning() {

@@ -132,7 +132,12 @@ public final class DbSession implements AutoCloseable {
             Object[] row = new Object[columnCount];
             for (int i = 1; i <= columnCount; i++) {
                 Object value = rs.getObject(i);
-                row[i - 1] = value instanceof byte[] bytes ? "<binary " + bytes.length + "B>" : value;
+                row[i - 1] = switch (value) {
+                    case byte[] bytes -> "<binary " + bytes.length + "B>";
+                    case org.postgresql.util.PGobject pg -> pg.getValue();
+                    case null -> null;
+                    default -> value;
+                };
             }
             rows.add(row);
         }

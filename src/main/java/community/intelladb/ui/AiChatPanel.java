@@ -462,7 +462,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
     /** Runs the SQL and appends the result table into the conversation. */
     private void runSqlInline(@NotNull DbConfig forConfig, @NotNull String sql) {
         opener.withSession(forConfig, session -> {
-            ResultsPanel results = new ResultsPanel();
+            ResultsPanel results = new ResultsPanel(project);
             results.setPreferredSize(new Dimension(bubbleTextWidth(), INLINE_RESULT_HEIGHT));
             results.showRunning();
             JPanel resultRow = bubble("Query result", results, false);

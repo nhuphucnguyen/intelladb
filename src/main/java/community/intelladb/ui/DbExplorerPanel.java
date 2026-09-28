@@ -202,7 +202,7 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         String title = "Data — " + table.schema() + "." + table.name();
         ResultsPanel panel = findResultsTab(title);
         if (panel == null) {
-            panel = new ResultsPanel();
+            panel = new ResultsPanel(project);
             tabs.addTab(title, IntellaDbIcons.TABLE, panel);
         }
         tabs.setSelectedComponent(panel);
