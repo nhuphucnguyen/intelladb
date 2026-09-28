@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "community.intelladb"
-version = "0.3.0"
+version = "0.3.1"
 
 java {
     // The 2026.2 platform is built with Java 25; plugin compilation must match.

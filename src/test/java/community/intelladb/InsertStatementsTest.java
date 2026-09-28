@@ -96,6 +96,39 @@ class InsertStatementsTest {
         assertEquals("CAST('2024' AS int)", text);
     }
 
+    @Test
+    void statementRangeCoversTheWholeStatement() {
+        // Regression: the statement's end offset was computed in token units, so any
+        // caret inside the VALUES tuple (past the first few characters) fell outside
+        // the statement and the editor aid silently did nothing.
+        List<InsertStatements.Statement> statements = InsertStatements.parse(LONG_INSERT);
+        assertEquals(1, statements.size());
+        InsertStatements.Statement s = statements.get(0);
+        int semicolonEnd = LONG_INSERT.indexOf(';') + 1;
+        assertTrue(s.endOffset >= semicolonEnd,
+                "endOffset " + s.endOffset + " should cover the ';' at " + semicolonEnd);
+        // a caret on the last tuple's last value must be inside the statement
+        TextRange lastValue = s.tuples.get(1).get(4);
+        assertTrue(lastValue.getStartOffset() + 1 <= s.endOffset);
+    }
+
+    @Test
+    void statementRangeCoversTupleWhenNoSemicolon() {
+        String sql = "INSERT INTO t (a, b)\nVALUES (1, 2)";
+        InsertStatements.Statement s = InsertStatements.parse(sql).get(0);
+        assertEquals(sql.length(), s.endOffset);
+        InsertStatements.Pairing pairing = InsertStatements.pairingFor(s, sql.length() - 2);
+        assertNotNull(pairing);
+        assertEquals(s.columns.get(1), pairing.columnRange());
+    }
+
+    @Test
+    void insertWithoutColumnListRangeCoversStatement() {
+        String sql = "INSERT INTO t SELECT * FROM u WHERE x > 1;";
+        InsertStatements.Statement s = InsertStatements.parse(sql).get(0);
+        assertEquals(sql.length(), s.endOffset);
+    }
+
     private static double valueNumber(String text, TextRange range) {
         return Double.parseDouble(text.substring(range.getStartOffset(), range.getEndOffset()));
     }

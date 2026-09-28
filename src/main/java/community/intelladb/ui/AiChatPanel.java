@@ -314,8 +314,10 @@ public final class AiChatPanel extends JPanel implements Disposable {
         boolean localProvider = settings.presetId().equals("ollama") || settings.presetId().equals("lmstudio");
 
         CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
-            // PasswordSafe read must stay off the EDT.
-            String key = AiCredentials.read();
+            // PasswordSafe reads must stay off the EDT, and local providers must not
+            // touch the credential store at all — they never need a key, and the
+            // macOS keychain lookup can block on an access prompt.
+            String key = localProvider ? null : AiCredentials.read();
             boolean missingKey = (key == null || key.isBlank()) && !localProvider;
             if (baseUrl.isBlank() || model.isBlank() || missingKey) {
                 throw new AiException("No AI provider is configured (or the API key is missing).\n"

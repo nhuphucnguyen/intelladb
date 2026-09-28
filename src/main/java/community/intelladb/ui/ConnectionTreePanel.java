@@ -186,7 +186,11 @@ public final class ConnectionTreePanel implements Disposable {
         StringBuilder sb = new StringBuilder();
         for (Object element : path.getPath()) {
             if (element instanceof DefaultMutableTreeNode node) {
-                switch (node.getUserObject()) {
+                Object userObject = node.getUserObject();
+                if (userObject == null) {
+                    continue; // e.g. the invisible root during dispose-time rebuilds
+                }
+                switch (userObject) {
                     case ConfigEntry c -> sb.append("/c:").append(c.config().id);
                     case SchemaEntry s -> sb.append("/s:").append(s.name());
                     case TableEntry t -> sb.append("/t:").append(t.meta().name);

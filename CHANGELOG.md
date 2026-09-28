@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.3.1
+
+### Fixed
+- **The INSERT column↔value aid only worked near the start of a statement**: the
+  statement's end offset was computed in token units instead of character offsets,
+  so any caret inside the VALUES tuple (or on the closing part of the statement) fell
+  outside the parsed statement and the pairing highlights and inline column hints
+  never appeared. The statement range now covers the full statement through its
+  terminating semicolon (regression-tested).
+- **AI chat could hang forever at "thinking…" with a local provider (Ollama/LM
+  Studio)**: the API key was read from the IDE credential store even though local
+  providers never need one, and on macOS that keychain lookup can block on an access
+  prompt. The key is now only read for providers that actually use one.
+- **A stray bright "chip" appeared behind the DB Explorer's tab headers** (most visible
+  behind the AI Assistant tab): the tabbed pane paints its own selected-tab highlight
+  across the full tab rect, and the custom pill drawn on top of it was smaller, so the
+  platform highlight peeked out around every tab. Headers no longer paint a pill of
+  their own — the platform highlight alone marks the active tab, and there is nothing
+  left to peek from behind it.
+- **A NullPointerException was logged when closing a project or the IDE**: connection
+  change listeners rebuilt the explorer tree while the project was already disposing.
+  Tree refreshes are now skipped once the project is disposed, and tree keys tolerate
+  nodes without a user object.
+- Middle-clicking a tab header now actually closes the tab (previously only clicks on
+  the empty tab-strip area did).
+- The "Running…" status in results grids used raw blue, which was barely readable in
+  dark themes; it now uses the theme's link color.
+
 ## 0.3.0
 
 Released 2026-09-28. Includes everything below (M10-M18): the IntelliJ-style layout

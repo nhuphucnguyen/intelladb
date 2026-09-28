@@ -64,7 +64,6 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
     private javax.swing.JComponent buildRightPane() {
         tabs = new JBTabbedPane(SwingConstants.TOP);
         tabs.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
-        tabs.addChangeListener(e -> tabs.repaint()); // redraw header fill for the new selection
         tabs.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mouseClicked(@NotNull java.awt.event.MouseEvent e) {
@@ -236,36 +235,26 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
 
     /**
      * Adds a tab whose header carries a close (×) button — without it the work tabs
-     * (console, data preview) could never be closed. Each header is drawn as a bordered
-     * pill, and the selected tab gets a filled background, so tabs read as separate
-     * clickable units.
+     * could never be closed. The header draws no background of its own: the tabbed
+     * pane's own selected-tab highlight marks the active tab (a custom pill painted
+     * here was smaller than the platform's tab rect, so a stray "chip" peeked out
+     * around every tab).
      */
     private void addClosableTab(@NotNull String title, @NotNull javax.swing.Icon icon,
                                 @NotNull javax.swing.JComponent component) {
         tabs.addTab(title, icon, component);
-        javax.swing.JPanel header = new javax.swing.JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0)) {
-            @Override
-            protected void paintComponent(@NotNull java.awt.Graphics g) {
-                if (tabs.getSelectedIndex() == tabs.indexOfComponent(component)) {
-                    java.awt.Graphics2D gr = (java.awt.Graphics2D) g.create();
-                    gr.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
-                            java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
-                    gr.setColor(com.intellij.util.ui.JBUI.CurrentTheme.DefaultTabs.background());
-                    gr.fillRoundRect(1, 1, getWidth() - 2, getHeight() - 2, 12, 12);
-                    gr.dispose();
-                }
-                super.paintComponent(g);
-            }
-        };
+        javax.swing.JPanel header = new javax.swing.JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
         header.setOpaque(false);
-        header.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(com.intellij.ui.JBColor.border(), 1, true),
-                com.intellij.util.ui.JBUI.Borders.empty(3, 8)));
         header.setToolTipText("Middle-click closes the tab");
         header.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mouseClicked(@NotNull java.awt.event.MouseEvent e) {
-                tabs.setSelectedComponent(component);
+                // middle-click closes the tab, any other click selects it
+                if (e.getButton() == java.awt.event.MouseEvent.BUTTON2) {
+                    closeTab(component);
+                } else {
+                    tabs.setSelectedComponent(component);
+                }
             }
         });
         header.add(new JBLabel(title, icon, javax.swing.SwingConstants.LEFT));
@@ -350,6 +339,9 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
     }
 
     public void refreshTree() {
+        if (project.isDisposed()) {
+            return; // change listeners can fire while the project is shutting down
+        }
         treePanel.rebuild();
     }
 

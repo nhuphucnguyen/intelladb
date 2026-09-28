@@ -66,7 +66,9 @@ public final class ResultsPanel extends JPanel {
 
     public void showRunning() {
         info.setText("Running…");
-        info.setForeground(com.intellij.ui.JBColor.BLUE);
+        // Link foreground (theme-aware), not raw blue — which is unreadable in dark themes.
+        info.setForeground(com.intellij.ui.JBColor.namedColor("Link.activeForeground",
+                new com.intellij.ui.JBColor(new java.awt.Color(0x2470B8), new java.awt.Color(0x6F9FCC))));
     }
 
     public void showMessage(@NotNull String message) {

@@ -144,8 +144,9 @@ public final class InsertStatements {
                     && charAt(text, tokens.get(end)) == ';')) {
                 end++;
             }
-            out.add(new Statement(tokens.get(insertIdx).start, Math.min(end, tokens.size()),
-                    List.of(), List.of()));
+            int endOffset = end < tokens.size() ? tokens.get(end).end
+                    : endOffsetOf(text, tokens, insertIdx, tokens.size());
+            out.add(new Statement(tokens.get(insertIdx).start, endOffset, List.of(), List.of()));
             return Math.max(end, insertIdx + 1);
         }
         int columnsOpen = i;
@@ -185,8 +186,28 @@ public final class InsertStatements {
             // INSERT ... SELECT etc. — no value tuples to pair
             break;
         }
-        out.add(new Statement(tokens.get(insertIdx).start, statementEnd, columns, tuples));
+        out.add(new Statement(tokens.get(insertIdx).start,
+                endOffsetOf(text, tokens, insertIdx, statementEnd), columns, tuples));
         return Math.max(statementEnd, insertIdx + 1);
+    }
+
+    /**
+     * Character offset just past the statement — the end of the last consumed token
+     * ({@code lastTokenIdx} is a token index, exclusive), extended over a terminating
+     * semicolon so a caret resting on it still counts as inside the statement.
+     */
+    private static int endOffsetOf(@NotNull String text, @NotNull List<Tok> tokens,
+                                   int insertIdx, int lastTokenIdx) {
+        int last = lastTokenIdx - 1;
+        if (last < insertIdx) {
+            return tokens.get(insertIdx).end;
+        }
+        int end = tokens.get(last).end;
+        if (last + 1 < tokens.size() && tokens.get(last + 1).type == T_PUNCT
+                && charAt(text, tokens.get(last + 1)) == ';') {
+            end = tokens.get(last + 1).end;
+        }
+        return end;
     }
 
     private static int matchParen(@NotNull String text, @NotNull List<Tok> tokens, int openIdx) {
