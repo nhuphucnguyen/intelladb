@@ -1,5 +1,6 @@
 package community.intelladb.ui;
 
+import com.intellij.openapi.application.WriteIntentReadAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.startup.ProjectActivity;
 import com.intellij.openapi.wm.ToolWindowManager;
@@ -17,12 +18,14 @@ public final class ConsoleRestoreStartup implements ProjectActivity {
             return Unit.INSTANCE;
         }
         // Once tool windows are registered; find() creates the explorer that owns the consoles.
-        ToolWindowManager.getInstance(project).invokeLater(() -> {
+        // That callback holds no lock, and creating a console touches its document (and
+        // writes the restored text), so take the write-intent lock like a normal EDT event.
+        ToolWindowManager.getInstance(project).invokeLater(() -> WriteIntentReadAction.run((Runnable) () -> {
             DbExplorerPanel explorer = project.isDisposed() ? null : DbExplorerPanel.find(project);
             if (explorer != null) {
                 explorer.restoreConsoles();
             }
-        });
+        }));
         return Unit.INSTANCE;
     }
 }
