@@ -767,23 +767,18 @@ public final class AiChatPanel extends JPanel implements Disposable {
     }
 
     /**
-     * A model in the picker: hovering opens its reasoning levels (picking one selects the
-     * model at that level); clicking the model itself selects it at its current level.
+     * A model in the picker: a plain submenu, so hovering opens its reasoning levels right
+     * away (a clickable "perform group" would hide them behind a ⋯ button); picking a level
+     * selects the model at that level.
      */
     private static @NotNull DefaultActionGroup modelItem(@NotNull AiSettings settings, @NotNull AiPreset provider,
                                                          @NotNull String model) {
         boolean active = provider.id().equals(settings.presetId()) && model.equals(settings.model());
         ReasoningEffort current = settings.reasoningEffort(provider.id(), model);
         DefaultActionGroup item = new DefaultActionGroup(
-                current == ReasoningEffort.DEFAULT ? model : model + " · " + current.label, true) {
-            @Override
-            public void actionPerformed(@NotNull AnActionEvent e) {
-                settings.setActive(provider.id(), model);
-            }
-        };
+                current == ReasoningEffort.DEFAULT ? model : model + " · " + current.label, true);
         item.getTemplatePresentation().setDescription(provider.label() + " — " + model);
         item.getTemplatePresentation().setIcon(active ? AllIcons.Actions.Checked : null);
-        item.getTemplatePresentation().setPerformGroup(true);
         for (ReasoningEffort effort : ReasoningEffort.values()) {
             String text = effort == ReasoningEffort.DEFAULT ? "Default (provider decides)" : effort.label;
             item.add(new DumbAwareAction(text, "Reasoning effort: " + effort.label,
