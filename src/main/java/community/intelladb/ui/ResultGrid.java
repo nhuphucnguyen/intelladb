@@ -87,8 +87,14 @@ final class ResultGrid extends JBTable {
 
             @Override
             public void mouseMoved(@NotNull MouseEvent e) {
-                setCursor(onJsonIcon(e.getPoint())
-                        ? java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR) : null);
+                boolean onIcon = onJsonIcon(e.getPoint());
+                setCursor(onIcon ? java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR) : null);
+                setHoveredIcon(onIcon ? rowAtPoint(e.getPoint()) : -1, onIcon ? columnAtPoint(e.getPoint()) : -1);
+            }
+
+            @Override
+            public void mouseExited(@NotNull MouseEvent e) {
+                setHoveredIcon(-1, -1);
             }
         };
         addMouseListener(mouse);
@@ -175,28 +181,50 @@ final class ResultGrid extends JBTable {
         return trimmed.startsWith("{") ? JsonKind.OBJECT : JsonKind.ARRAY;
     }
 
-    private static @Nullable javax.swing.Icon jsonIcon(@NotNull JsonKind kind) {
-        return switch (kind) {
-            case OBJECT -> AllIcons.Json.Object;
-            case ARRAY -> AllIcons.Json.Array;
-            case NONE -> null;
-        };
+    /**
+     * The "open in viewer" affordance of a JSON cell: a neutral expand icon at the cell's
+     * right edge — not a {} glyph, which read as part of the value right before its own "{".
+     */
+    private static @Nullable javax.swing.Icon jsonIcon(@NotNull JsonKind kind, boolean hovered) {
+        if (kind == JsonKind.NONE) {
+            return null;
+        }
+        return hovered ? AllIcons.General.ExpandComponentHover : AllIcons.General.ExpandComponent;
     }
 
-    /** Is the point on the {} / [] icon of a JSON cell? A click there opens the JSON viewer. */
+    private int hoveredRow = -1;
+    private int hoveredColumn = -1;
+
+    private void setHoveredIcon(int row, int column) {
+        if (row == hoveredRow && column == hoveredColumn) {
+            return;
+        }
+        repaintCell(hoveredRow, hoveredColumn);
+        hoveredRow = row;
+        hoveredColumn = column;
+        repaintCell(row, column);
+    }
+
+    private void repaintCell(int row, int column) {
+        if (row >= 0 && column >= 0 && row < getRowCount() && column < getColumnCount()) {
+            repaint(getCellRect(row, column, false));
+        }
+    }
+
+    /** Is the point on the expand icon of a JSON cell? A click there opens the JSON viewer. */
     private boolean onJsonIcon(@NotNull java.awt.Point point) {
         int row = rowAtPoint(point);
         int column = columnAtPoint(point);
         if (row < 0 || column < 0) {
             return false;
         }
-        javax.swing.Icon icon = jsonIcon(jsonKind(row, column));
+        javax.swing.Icon icon = jsonIcon(jsonKind(row, column), false);
         if (icon == null) {
             return false;
         }
         java.awt.Rectangle cell = getCellRect(row, column, false);
-        int start = cell.x + JBUI.scale(CELL_PADDING);
-        return point.x >= start - JBUI.scale(2) && point.x <= start + icon.getIconWidth() + JBUI.scale(2);
+        int iconStart = cell.x + cell.width - JBUI.scale(CELL_PADDING) - icon.getIconWidth();
+        return point.x >= iconStart - JBUI.scale(3);
     }
 
     @Override
@@ -237,22 +265,36 @@ final class ResultGrid extends JBTable {
     }
 
     private final class CellRenderer extends ColoredTableCellRenderer {
+        /** Painted at the right edge (see {@link #paintComponent}); null for non-JSON cells. */
+        private @Nullable javax.swing.Icon trailingIcon;
+
         @Override
         protected void customizeCellRenderer(@NotNull JTable table, @Nullable Object value, boolean selected,
                                              boolean hasFocus, int row, int column) {
             setFont(table.getFont());
-            setBorder(JBUI.Borders.empty(0, CELL_PADDING));
             boolean numeric = isNumericColumn(table.convertColumnIndexToModel(column));
             setTextAlign(numeric ? SwingConstants.RIGHT : SwingConstants.LEFT);
-            javax.swing.Icon json = value == null ? null : jsonIcon(jsonKind(row, column));
-            if (json != null) {
-                setIcon(json); // clickable: opens the JSON viewer
-                setIconTextGap(JBUI.scale(4));
-            }
+            trailingIcon = value == null ? null
+                    : jsonIcon(jsonKind(row, column), row == hoveredRow && column == hoveredColumn);
+            // Reserve the icon's strip on the right so the text never runs under it.
+            int right = CELL_PADDING + (trailingIcon == null ? 0
+                    : JBUI.unscale(trailingIcon.getIconWidth()) + 4);
+            setBorder(JBUI.Borders.empty(0, CELL_PADDING, 0, right));
             if (value == null) {
                 append("<null>", SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES);
             } else {
                 append(display(value), SimpleTextAttributes.REGULAR_ATTRIBUTES);
+            }
+        }
+
+        @Override
+        protected void paintComponent(java.awt.Graphics g) {
+            super.paintComponent(g);
+            javax.swing.Icon icon = trailingIcon;
+            if (icon != null) {
+                int x = getWidth() - JBUI.scale(CELL_PADDING) - icon.getIconWidth();
+                int y = (getHeight() - icon.getIconHeight()) / 2;
+                icon.paintIcon(this, g, x, y);
             }
         }
     }
