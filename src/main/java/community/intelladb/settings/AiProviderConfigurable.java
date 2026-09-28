@@ -155,8 +155,14 @@ public final class AiProviderConfigurable implements Configurable {
         temperature.setValue(settings.temperature());
         maxTokens.setValue(settings.maxTokens());
         includeSchema.setSelected(settings.includeSchema());
-        apiKey.getEmptyText().setText(AiCredentials.read() != null
-                ? "A key is saved (leave empty to keep it)" : "Paste your API key");
+        // PasswordSafe must not be read on the EDT; refresh the hint asynchronously.
+        apiKey.getEmptyText().setText("Paste your API key");
+        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            boolean saved = AiCredentials.read() != null;
+            com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() ->
+                    apiKey.getEmptyText().setText(saved
+                            ? "A key is saved (leave empty to keep it)" : "Paste your API key"));
+        });
     }
 
     private static int presetIndexOf(@NotNull String id) {

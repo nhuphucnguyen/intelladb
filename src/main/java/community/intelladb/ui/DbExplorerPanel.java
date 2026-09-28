@@ -209,17 +209,6 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         table.showIn(this, panel);
     }
 
-    /** Opens (or focuses) a named results tab and returns it (used by AI-generated queries). */
-    public @NotNull ResultsPanel openResultsTab(@NotNull String title) {
-        ResultsPanel panel = findResultsTab(title);
-        if (panel == null) {
-            panel = new ResultsPanel();
-            tabs.addTab(title, IntellaDbIcons.TABLE, panel);
-        }
-        tabs.setSelectedComponent(panel);
-        return panel;
-    }
-
     /** Opens (or focuses) the AI assistant tab. */
     public void openAiAssistant() {
         AiChatPanel aiPanel = aiPanel();
@@ -278,22 +267,32 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
             action.accept(existing);
             return;
         }
-        String password = manager.readPassword(config);
-        if (password == null) {
-            String typed = Messages.showPasswordDialog(project,
-                    "Password for " + config.user + "@" + config.describe(),
-                    "Connect to " + config.dialect().displayName(), Messages.getQuestionIcon());
-            if (typed == null) {
+        // PasswordSafe access must not run on the EDT.
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            String password = manager.readPassword(config);
+            if (password != null) {
+                connectInBackground(config, password, action);
                 return;
             }
-            manager.rememberPasswordInMemory(config, typed);
-            password = typed;
-        }
-        String connectPassword = password;
+            ApplicationManager.getApplication().invokeLater(() -> {
+                String typed = Messages.showPasswordDialog(project,
+                        "Password for " + config.user + "@" + config.describe(),
+                        "Connect to " + config.dialect().displayName(), Messages.getQuestionIcon());
+                if (typed == null) {
+                    return;
+                }
+                manager.rememberPasswordInMemory(config, typed);
+                connectInBackground(config, typed, action);
+            });
+        });
+    }
+
+    private void connectInBackground(@NotNull DbConfig config, @NotNull String password,
+                                     @NotNull Consumer<DbSession> action) {
         treePanel.setConnecting(config, true);
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             try {
-                DbSession session = manager.connect(config, connectPassword);
+                DbSession session = manager.connect(config, password);
                 ApplicationManager.getApplication().invokeLater(() -> action.accept(session));
             } catch (Exception ex) {
                 ApplicationManager.getApplication().invokeLater(() -> {

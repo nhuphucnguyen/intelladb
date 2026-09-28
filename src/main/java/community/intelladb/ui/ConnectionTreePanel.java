@@ -236,12 +236,21 @@ public final class ConnectionTreePanel implements Disposable {
         } else {
             transientState.remove(config.id);
         }
-        rebuild();
+        rebuildOnEdt();
     }
 
     public void setError(@NotNull DbConfig config, @NotNull String message) {
         transientState.put(config.id, "error:" + message);
-        rebuild();
+        rebuildOnEdt();
+    }
+
+    /** Callers may be on pooled threads; tree model changes must run on the EDT. */
+    private void rebuildOnEdt() {
+        if (com.intellij.openapi.application.ApplicationManager.getApplication().isDispatchThread()) {
+            rebuild();
+        } else {
+            com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(this::rebuild);
+        }
     }
 
     // ------------------------------------------------------------------ actions
