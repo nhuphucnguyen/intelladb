@@ -367,7 +367,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
         }
         input.setText("");
         sendButton.setEnabled(false);
-        appendMessage(bubble(null, body(question, 56), true), true);
+        appendMessage(bubble(null, userBody(question), true), true);
         // Connects (with password prompt) when needed, then continues on the EDT.
         // The provider pre-check runs inside doSend's background path (PasswordSafe
         // must not be read on the EDT).
@@ -700,6 +700,31 @@ public final class AiChatPanel extends JPanel implements Disposable {
         int longest = text.lines().mapToInt(String::length).max().orElse(20);
         int wrapColumns = Math.max(24, bubbleTextWidth() / charWidth);
         area.setColumns(Math.max(10, Math.min(maxColumns, Math.min(longest + 1, wrapColumns))));
+        return area;
+    }
+
+    /**
+     * The text of a user message: as wide as its longest line, up to three quarters of the
+     * transcript, wrapping only beyond that. Sized from the rendered string width — column
+     * counts undershoot and wrapped short questions after a dozen characters.
+     */
+    private @NotNull JComponent userBody(@NotNull String text) {
+        JBTextArea area = new JBTextArea(text);
+        area.setLineWrap(true);
+        area.setWrapStyleWord(true);
+        area.setEditable(false);
+        area.setFocusable(false);
+        area.setOpaque(false);
+        area.setBorder(JBUI.Borders.empty());
+        area.setFont(JBUI.Fonts.label(13)); // same face as the assistant's answers
+        java.awt.FontMetrics metrics = area.getFontMetrics(area.getFont());
+        int longest = text.lines().mapToInt(metrics::stringWidth).max().orElse(0);
+        int max = Math.max(160, bubbleTextWidth() * 3 / 4);
+        int width = Math.min(max, longest + JBUI.scale(4));
+        area.setSize(width, Integer.MAX_VALUE); // lets the wrapped height be measured at this width
+        Dimension size = new Dimension(width, area.getPreferredSize().height);
+        area.setPreferredSize(size);
+        area.setMinimumSize(size);
         return area;
     }
 
