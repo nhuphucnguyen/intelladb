@@ -174,6 +174,11 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
 
     /** As {@link #openConsole(DbConfig)}; a non-null {@code sql} replaces the console text. */
     public @NotNull SqlConsole openConsole(@NotNull DbConfig config, @Nullable String sql) {
+        return openConsole(config, sql, null);
+    }
+
+    /** As {@link #openConsole(DbConfig, String)}; a non-null {@code schema} becomes the console's default schema. */
+    public @NotNull SqlConsole openConsole(@NotNull DbConfig config, @Nullable String sql, @Nullable String schema) {
         SqlConsole console = consoles.computeIfAbsent(config.id, id -> {
             SqlConsole created = new SqlConsole(project, this, config);
             Disposer.register(this, created);
@@ -181,6 +186,9 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         });
         if (sql != null) {
             console.setSql(sql);
+        }
+        if (schema != null) {
+            console.setSchema(schema);
         }
         var editors = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
                 .openFile(console.file(), true);

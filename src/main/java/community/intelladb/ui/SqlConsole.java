@@ -131,6 +131,11 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
                 document.replaceString(0, document.getTextLength(), sql));
     }
 
+    /** Makes {@code name} the console's default schema, as picking it in the schema switcher does. */
+    public void setSchema(@NotNull String name) {
+        schema = name;
+    }
+
     // ------------------------------------------------------------------ editor header
 
     /** Adds the console toolbar above a text editor showing this console (idempotent). */

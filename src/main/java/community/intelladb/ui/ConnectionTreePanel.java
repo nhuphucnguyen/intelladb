@@ -356,10 +356,15 @@ public final class ConnectionTreePanel implements Disposable {
     }
 
     private void openConsole(@NotNull DbConfig config) {
+        openConsole(config, null);
+    }
+
+    /** Opens the connection's console; a non-null {@code schema} becomes its default schema. */
+    private void openConsole(@NotNull DbConfig config, @Nullable String schema) {
         if (manager.session(config.id) != null) {
-            explorer.openConsole(config);
+            explorer.openConsole(config, null, schema);
         } else {
-            explorer.withSession(config, session -> explorer.openConsole(config));
+            explorer.withSession(config, session -> explorer.openConsole(config, null, schema));
         }
     }
 
@@ -414,7 +419,7 @@ public final class ConnectionTreePanel implements Disposable {
             group.add(action("Refresh Schema", "Reload metadata",
                     com.intellij.icons.AllIcons.Actions.Refresh, this::refreshSelected));
             group.add(action("New SQL Console", "Open a SQL console",
-                    com.intellij.icons.AllIcons.Nodes.Console, () -> openConsole(config)));
+                    com.intellij.icons.AllIcons.Nodes.Console, () -> openConsole(config, schemaEntry.name())));
             group.add(action("Copy Schema DDL", "Copy CREATE TABLE statements",
                     com.intellij.icons.AllIcons.Actions.Copy, () -> {
                         DbSession session = manager.session(config.id);
@@ -431,7 +436,7 @@ public final class ConnectionTreePanel implements Disposable {
             group.add(action("View Data", "Preview first 200 rows",
                     com.intellij.icons.AllIcons.Actions.Preview, () -> openTableData(ref)));
             group.add(action("New SQL Console", "Open a SQL console",
-                    com.intellij.icons.AllIcons.Nodes.Console, () -> openConsole(tableEntry.config())));
+                    com.intellij.icons.AllIcons.Nodes.Console, () -> openConsole(tableEntry.config(), tableEntry.schema())));
             group.addSeparator();
             group.add(action("Copy Table DDL", "Copy CREATE TABLE statement",
                     com.intellij.icons.AllIcons.Actions.Copy, () -> copyDdl(new SchemaCatalog(List.of(
