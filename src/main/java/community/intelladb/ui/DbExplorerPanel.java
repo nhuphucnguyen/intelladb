@@ -190,6 +190,21 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         return console;
     }
 
+    /** The explorer of the project's DB Explorer tool window, or null if it was never opened. */
+    public static @Nullable DbExplorerPanel find(@NotNull Project project) {
+        var toolWindow = com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
+                .getToolWindow(DbToolWindowFactory.TOOL_WINDOW_ID);
+        if (toolWindow == null) {
+            return null;
+        }
+        for (var content : toolWindow.getContentManager().getContents()) {
+            if (content.getComponent() instanceof DbExplorerPanel explorer) {
+                return explorer;
+            }
+        }
+        return null;
+    }
+
     /** Selects the AI Assistant tab of the tool window (the chat itself always exists). */
     public void openAiAssistant() {
         var toolWindow = com.intellij.openapi.wm.ToolWindowManager.getInstance(project)

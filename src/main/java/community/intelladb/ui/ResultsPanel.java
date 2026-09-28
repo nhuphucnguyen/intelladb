@@ -49,6 +49,11 @@ public final class ResultsPanel extends JPanel {
 
         void cancel();
 
+        /** False for a cached result (query history): Rerun / Cancel are hidden. */
+        default boolean canRerun() {
+            return true;
+        }
+
         /** Connection the rows come from — names the export source and finds its DDL. */
         default @Nullable DbConfig config() {
             return null;
@@ -161,6 +166,7 @@ public final class ResultsPanel extends JPanel {
 
             @Override
             public void update(@NotNull AnActionEvent e) {
+                e.getPresentation().setVisible(host != null && host.canRerun());
                 e.getPresentation().setEnabled(!running && result != null);
             }
 
@@ -179,6 +185,7 @@ public final class ResultsPanel extends JPanel {
 
             @Override
             public void update(@NotNull AnActionEvent e) {
+                e.getPresentation().setVisible(host != null && host.canRerun());
                 e.getPresentation().setEnabled(running);
             }
 

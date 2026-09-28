@@ -25,6 +25,8 @@ import java.util.function.Consumer;
 public final class ResultsHub implements Disposable {
 
     public static final String TOOL_WINDOW_ID = "DB Services";
+    static final String CONSOLES_TAB = "Consoles";
+    static final String HISTORY_TAB = "History";
 
     private final Project project;
     private final Map<SqlConsole, ConsoleResultsView> views = new LinkedHashMap<>();
@@ -71,10 +73,27 @@ public final class ResultsHub implements Disposable {
             return;
         }
         toolWindow.show(() -> {
+            selectTab(toolWindow, CONSOLES_TAB);
             if (selector != null) {
                 selector.accept(console);
             }
         });
+    }
+
+    /** Opens DB Services on the History tab (recent queries and their results). */
+    void showHistory() {
+        ToolWindow toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID);
+        if (toolWindow != null) {
+            toolWindow.activate(() -> selectTab(toolWindow, HISTORY_TAB));
+        }
+    }
+
+    private static void selectTab(@NotNull ToolWindow toolWindow, @NotNull String name) {
+        var contents = toolWindow.getContentManager();
+        var content = contents.findContent(name);
+        if (content != null && content != contents.getSelectedContent()) {
+            contents.setSelectedContent(content);
+        }
     }
 
     @Override

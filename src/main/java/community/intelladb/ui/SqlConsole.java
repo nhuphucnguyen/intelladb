@@ -173,6 +173,13 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         });
         left.addSeparator();
         left.add(new RunModeAction());
+        left.add(new DumbAwareAction("Query History", "Recent queries with their results",
+                AllIcons.Vcs.History) {
+            @Override
+            public void actionPerformed(@NotNull AnActionEvent e) {
+                ResultsHub.getInstance(project).showHistory();
+            }
+        });
         left.add(new DumbAwareAction("Show Results", "Show this console's results in DB Services",
                 AllIcons.Toolwindows.ToolWindowServices) {
             @Override
