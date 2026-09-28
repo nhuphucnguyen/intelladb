@@ -79,6 +79,7 @@ public final class ConnectionTreePanel implements Disposable {
         tree.setRootVisible(false);
         tree.setShowsRootHandles(true);
         tree.setCellRenderer(new Renderer());
+        javax.swing.ToolTipManager.sharedInstance().registerComponent(tree);
         tree.getEmptyText().setText("No connections yet — click + to add one");
         tree.addMouseListener(new MouseHandler());
 
@@ -432,7 +433,7 @@ public final class ConnectionTreePanel implements Disposable {
                     com.intellij.icons.AllIcons.Actions.Copy, () -> copyDdl(new SchemaCatalog(List.of(
                             new SchemaCatalog.Schema(tableEntry.schema(), List.of(tableEntry.meta())))), "Table")));
             group.add(action("Ask AI about this table", "Explain this table with the AI assistant",
-                    IntellaDbIcons.AI, () -> AiChatPanel.openWithDraft(project,
+                    IntellaDbIcons.AI, () -> AiChatPanel.openInExplorer(project,
                             "Explain the table " + tableEntry.schema() + "."
                                     + tableEntry.meta().name + " and how it relates to other tables.")));
         } else if (entry instanceof ColumnEntry columnEntry) {
@@ -471,13 +472,15 @@ public final class ConnectionTreePanel implements Disposable {
             if (!(value instanceof DefaultMutableTreeNode node)) {
                 return;
             }
+            StringBuilder plain = new StringBuilder(); // tooltip: full label when the pane truncates it
             switch (node.getUserObject()) {
                 case ConfigEntry c -> {
                     DbConfig config = c.config();
                     boolean connected = manager.session(config.id) != null;
                     String state = connected ? null : transientState.get(config.id);
-                    append(config.name.isEmpty() ? config.describe() : config.name,
-                            SimpleTextAttributes.REGULAR_ATTRIBUTES);
+                    String name = config.name.isEmpty() ? config.describe() : config.name;
+                    plain.append(name);
+                    append(name, SimpleTextAttributes.REGULAR_ATTRIBUTES);
                     String suffix = "  —  " + config.describe();
                     if ("connecting".equals(state)) {
                         suffix = "  —  connecting…";
@@ -486,28 +489,38 @@ public final class ConnectionTreePanel implements Disposable {
                     } else if (connected) {
                         suffix = "  —  connected";
                     }
+                    plain.append(suffix);
                     append(suffix, SimpleTextAttributes.GRAYED_ATTRIBUTES);
                     setIcon(IntellaDbIcons.CONNECTION);
                 }
                 case SchemaEntry s -> {
+                    plain.append(s.name());
                     append(s.name(), SimpleTextAttributes.REGULAR_ATTRIBUTES);
                     setIcon(IntellaDbIcons.SCHEMA);
                 }
                 case TableEntry t -> {
+                    plain.append(t.meta().name);
                     append(t.meta().name, SimpleTextAttributes.REGULAR_ATTRIBUTES);
                     setIcon(t.meta().isView() ? IntellaDbIcons.VIEW : IntellaDbIcons.TABLE);
                 }
                 case ColumnEntry col -> {
+                    plain.append(col.name()).append(' ').append(col.type());
                     append(col.name() + "  ", col.pk() ? SimpleTextAttributes.REGULAR_ATTRIBUTES
                             : SimpleTextAttributes.GRAYED_ATTRIBUTES);
                     append(col.type(), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES);
                     setIcon(col.pk() ? IntellaDbIcons.KEY : IntellaDbIcons.COLUMN);
                 }
-                case String s -> append(s, "connecting…".equals(s)
-                        ? SimpleTextAttributes.GRAYED_ATTRIBUTES : SimpleTextAttributes.ERROR_ATTRIBUTES);
+                case String s -> {
+                    plain.append(s);
+                    append(s, "connecting…".equals(s)
+                            ? SimpleTextAttributes.GRAYED_ATTRIBUTES : SimpleTextAttributes.ERROR_ATTRIBUTES);
+                }
                 case null, default -> {
                 }
             }
+            // Guard with isShowing: setting tooltip text during off-screen layout passes
+            // makes ToolTipManager throw IllegalComponentStateException on hidden trees.
+            setToolTipText(tree.isShowing() && plain.length() > 0 ? plain.toString() : null);
         }
     }
 

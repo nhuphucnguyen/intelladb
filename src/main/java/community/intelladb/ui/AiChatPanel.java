@@ -59,14 +59,13 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Conversation-style AI chat in its own tool window. Questions, answers, SQL blocks and —
- * via Run — the query results all live in one scrolling transcript. A connection switcher
- * at the top picks which saved connection the chat talks to, so the DB Explorer tree and
- * this chat can be used independently. Enter sends, Shift+Enter inserts a newline.
+ * Conversation-style AI chat, hosted as a tab inside the DB Explorer tool window.
+ * Questions, answers, SQL blocks and — via Run — the query results all live in one
+ * scrolling transcript. A connection switcher at the top picks which saved connection
+ * the chat talks to. Enter sends, Shift+Enter inserts a newline.
  */
 public final class AiChatPanel extends JPanel implements Disposable {
 
-    private static final String TOOL_WINDOW_ID = AiAssistantToolWindowFactory.ID;
     private static final int BUBBLE_TEXT_WIDTH = 460;
     private static final int INLINE_RESULT_HEIGHT = 190;
 
@@ -256,17 +255,21 @@ public final class AiChatPanel extends JPanel implements Disposable {
         input.requestFocusInWindow();
     }
 
-    /** Opens the AI Assistant tool window, optionally pre-filling the input. */
-    public static void openWithDraft(@NotNull Project project, @NotNull String text) {
-        com.intellij.openapi.wm.ToolWindow toolWindow =
-                ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID);
+    /** Opens the AI tab inside the DB Explorer, optionally pre-filling the input. */
+    public static void openInExplorer(@NotNull Project project, @NotNull String text) {
+        var toolWindow = ToolWindowManager.getInstance(project)
+                .getToolWindow(DbToolWindowFactory.TOOL_WINDOW_ID);
         if (toolWindow == null) {
             return;
         }
         toolWindow.activate(() -> {
             for (var content : toolWindow.getContentManager().getContents()) {
-                if (content.getComponent() instanceof AiChatPanel panel && !text.isBlank()) {
-                    panel.setDraft(text);
+                if (content.getComponent() instanceof DbExplorerPanel explorer) {
+                    explorer.openAiAssistant();
+                    AiChatPanel panel = explorer.aiPanel();
+                    if (panel != null && !text.isBlank()) {
+                        panel.setDraft(text);
+                    }
                 }
             }
         });

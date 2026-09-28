@@ -40,6 +40,7 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
     private final ConnectionManager manager;
     private final ConnectionTreePanel treePanel;
     private JBTabbedPane tabs;
+    private AiChatPanel aiPanel;
 
     public DbExplorerPanel(@NotNull Project project) {
         super(true, true);
@@ -53,6 +54,8 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         splitter.setFirstComponent(new JBScrollPane(treePanel.tree()));
         splitter.setSecondComponent(buildRightPane());
         setContent(splitter);
+
+        openAiAssistant(); // the chat is a first-class tab, present from the start
 
         manager.addListener(this::refreshTree);
         Disposer.register(this, treePanel);
@@ -178,10 +181,10 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
             }
         });
         group.addSeparator();
-        group.add(new AnAction("AI Assistant", "Open the AI Assistant tool window", IntellaDbIcons.AI) {
+        group.add(new AnAction("AI Assistant", "Open the AI chat tab", IntellaDbIcons.AI) {
             @Override
             public void actionPerformed(@NotNull AnActionEvent e) {
-                AiChatPanel.openWithDraft(project, "");
+                openAiAssistant();
             }
         });
         group.add(new AnAction("AI Provider Settings", "Configure the AI provider (provider, key, model)",
@@ -255,6 +258,23 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         tabs.setTabComponentAt(tabs.indexOfComponent(component), header);
     }
 
+    /**
+     * Opens (or focuses) the AI chat as a work tab inside this explorer. The panel lives
+     * for as long as its tab; closing the tab disposes it (chat history resets).
+     */
+    public void openAiAssistant() {
+        if (aiPanel == null) {
+            aiPanel = new AiChatPanel(project);
+            addClosableTab("AI Assistant", IntellaDbIcons.AI, aiPanel);
+        }
+        tabs.setSelectedComponent(aiPanel);
+    }
+
+    /** The AI chat panel, or null until {@link #openAiAssistant()} first ran. */
+    public @Nullable AiChatPanel aiPanel() {
+        return aiPanel;
+    }
+
     /** Opens (or focuses) a data-preview tab for the table and (re)loads its rows. */
     public void openTableData(@NotNull TableRef table) {
         String title = "Data — " + table.schema() + "." + table.name();
@@ -271,7 +291,14 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
     public void closeTab(@Nullable java.awt.Component component) {
         int index = component != null ? tabs.indexOfComponent(component) : tabs.getSelectedIndex();
         if (index >= 0) {
+            java.awt.Component removed = tabs.getComponentAt(index);
             tabs.removeTabAt(index);
+            if (removed == aiPanel) {
+                aiPanel.dispose(); // idempotent; closing the tab resets the chat
+                aiPanel = null;
+            } else if (removed instanceof com.intellij.openapi.Disposable disposable) {
+                com.intellij.openapi.util.Disposer.dispose(disposable);
+            }
         }
     }
 
@@ -326,6 +353,9 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
 
     @Override
     public void dispose() {
+        if (aiPanel != null) {
+            aiPanel.dispose(); // idempotent; skipped when the tab was already closed
+        }
         manager.disconnectAll();
     }
 }

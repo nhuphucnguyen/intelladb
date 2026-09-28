@@ -2,6 +2,12 @@
 
 ## 0.2.0
 
+### Changed
+- **The AI Assistant now lives as a tab inside the DB Explorer** (next to SQL Console
+  and data-preview tabs) instead of being a second tool-window icon in the stripe. It
+  opens automatically, supports the same close/middle-click behavior as other tabs, and
+  the toolbar's AI button plus the tree's "Ask AI about this table" open or focus it.
+
 ### Added
 - **Cell value viewer**: double-click any cell in a results grid (console, View Data,
   AI chat results) to see the full value in a dialog with a Copy button. JSON and
@@ -17,6 +23,10 @@
   and middle-clicking a tab closes it (like editor tabs). Each tab header is drawn as a
   bordered pill (theme border color) with a filled background for the selected tab, and
   clicking a header switches to that tab.
+- **Connection tree could render blank** after the tooltip addition: tooltip text set
+  during off-screen layout passes made ToolTipManager throw
+  IllegalComponentStateException — now guarded with `isShowing()`. Truncated tree labels
+  also show their full text as a tooltip.
 - **"Insert into Console" from the AI chat did nothing**: the document change was made
   in a bare write action, which the platform rejects outside a command
   (IncorrectOperationException) — it now runs in a WriteCommandAction and the SQL lands
