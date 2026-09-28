@@ -1,7 +1,9 @@
 package dev.phucngu.intelladb.schema;
 
 import dev.phucngu.intelladb.connection.DbDialect;
+import dev.phucngu.intelladb.connection.PostgresDialect;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -13,7 +15,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
-/** Loads a {@link SchemaCatalog} over plain JDBC metadata (works for any JDBC database). */
+/**
+ * Loads a {@link SchemaCatalog} over plain JDBC metadata (works for any JDBC database);
+ * on PostgreSQL, {@link PostgresObjects} adds what JDBC metadata doesn't cover.
+ */
 public final class MetadataLoader {
 
     public static @NotNull SchemaCatalog load(@NotNull Connection connection, @NotNull DbDialect dialect)
@@ -21,13 +26,20 @@ public final class MetadataLoader {
         DatabaseMetaData meta = connection.getMetaData();
         String catalog = connection.getCatalog();
 
+        PostgresObjects pg = PostgresDialect.ID.equals(dialect.id()) ? PostgresObjects.load(connection) : null;
+
         // schema → (table name → TableMeta under construction)
         Map<String, Map<String, TableBuilder>> builders = new TreeMap<>();
 
+        int totalSchemas = 0;
         try (ResultSet rs = meta.getSchemas()) {
             while (rs.next()) {
                 String schema = rs.getString("TABLE_SCHEM");
-                if (schema != null && !dialect.systemSchemas().contains(schema.toLowerCase())) {
+                if (schema == null) {
+                    continue;
+                }
+                totalSchemas++;
+                if (!dialect.systemSchemas().contains(schema.toLowerCase())) {
                     builders.put(schema, new TreeMap<>());
                 }
             }
@@ -60,16 +72,27 @@ public final class MetadataLoader {
                 continue;
             }
             Map<String, List<String>> pkByTable = new LinkedHashMap<>();
-            try (ResultSet rs = meta.getPrimaryKeys(catalog, schema, "%")) {
-                while (rs.next()) {
-                    String table = rs.getString("TABLE_NAME");
-                    String column = rs.getString("COLUMN_NAME");
-                    if (table != null && column != null) {
-                        pkByTable.computeIfAbsent(table, k -> new ArrayList<>()).add(column);
+            if (pg != null) {
+                // pgjdbc's getPrimaryKeys takes a table name, not a pattern.
+                for (String table : tables.keySet()) {
+                    for (TableMeta.Key key : pg.keys.getOrDefault(schema + "." + table, List.of())) {
+                        if (key.primary()) {
+                            pkByTable.put(table, key.columns());
+                        }
                     }
                 }
-            } catch (SQLException ignored) {
-                // Some drivers don't support "%" for primary keys; fall back below.
+            } else {
+                try (ResultSet rs = meta.getPrimaryKeys(catalog, schema, "%")) {
+                    while (rs.next()) {
+                        String table = rs.getString("TABLE_NAME");
+                        String column = rs.getString("COLUMN_NAME");
+                        if (table != null && column != null) {
+                            pkByTable.computeIfAbsent(table, k -> new ArrayList<>()).add(column);
+                        }
+                    }
+                } catch (SQLException ignored) {
+                    // Some drivers don't support "%" for primary keys; fall back below.
+                }
             }
             try (ResultSet rs = meta.getColumns(catalog, schema, "%", "%")) {
                 while (rs.next()) {
@@ -96,10 +119,18 @@ public final class MetadataLoader {
 
         List<SchemaCatalog.Schema> schemas = new ArrayList<>();
         builders.forEach((schemaName, tables) -> {
-            List<TableMeta> tableMetas = tables.values().stream().map(TableBuilder::build).toList();
-            schemas.add(new SchemaCatalog.Schema(schemaName, tableMetas));
+            List<TableMeta> tableMetas = tables.values().stream().map(t -> t.build(schemaName, pg)).toList();
+            schemas.add(pg == null
+                    ? new SchemaCatalog.Schema(schemaName, tableMetas)
+                    : new SchemaCatalog.Schema(schemaName, tableMetas,
+                    pg.routines.getOrDefault(schemaName, List.of()),
+                    pg.sequences.getOrDefault(schemaName, List.of()),
+                    pg.objectTypes.getOrDefault(schemaName, List.of())));
         });
-        return new SchemaCatalog(schemas);
+        String database = catalog == null ? "" : catalog;
+        List<String> databases = pg != null ? pg.databases : database.isEmpty() ? List.of() : List.of(database);
+        return new SchemaCatalog(schemas, database, databases, totalSchemas,
+                pg == null ? List.of() : pg.extensions, pg == null ? List.of() : pg.roles);
     }
 
     private static TableMeta.@NotNull Kind kindOf(@NotNull String jdbcType) {
@@ -123,8 +154,14 @@ public final class MetadataLoader {
             this.remarks = remarks;
         }
 
-        TableMeta build() {
-            return new TableMeta(name, kind, List.copyOf(columns), remarks);
+        TableMeta build(@NotNull String schema, @Nullable PostgresObjects pg) {
+            if (pg == null) {
+                return new TableMeta(name, kind, List.copyOf(columns), remarks);
+            }
+            String key = schema + "." + name;
+            return new TableMeta(name, kind, List.copyOf(columns), remarks,
+                    pg.keys.getOrDefault(key, List.of()), pg.foreignKeys.getOrDefault(key, List.of()),
+                    pg.indexes.getOrDefault(key, List.of()), pg.checks.getOrDefault(key, List.of()));
         }
     }
 }
