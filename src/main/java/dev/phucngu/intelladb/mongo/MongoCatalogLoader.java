@@ -41,7 +41,11 @@ public final class MongoCatalogLoader {
             // Users without listDatabases see just the databases they named.
         }
         if (all.isEmpty()) {
-            all.addAll(onlyDatabases.isEmpty() ? List.of(fallbackDatabase) : onlyDatabases);
+            all.addAll(onlyDatabases);
+        }
+        // The database `db` points at, even before its first write creates it on the server.
+        if (onlyDatabases.isEmpty() && !all.contains(fallbackDatabase)) {
+            all.add(fallbackDatabase);
         }
         all.sort(null);
         List<SchemaCatalog.Schema> schemas = new ArrayList<>();

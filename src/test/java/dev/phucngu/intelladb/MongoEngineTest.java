@@ -282,4 +282,17 @@ class MongoEngineTest {
             assertTrue(tx.execute("db.dropDatabase()").isSuccessful());
         }
     }
+
+    @Test
+    void theConnectionsDatabaseIsListedBeforeItExists() throws Exception {
+        DbConfig config = config("mongodb://localhost:27017/");
+        config.database = "intelladb_not_created_yet";
+        assertTrue(DIALECT.probeSchemaNames(config, null).contains("intelladb_not_created_yet"));
+        try (DbSession fresh = new DbSession(config, null)) {
+            SchemaCatalog catalog = fresh.loadCatalog();
+            assertTrue(catalog.schemaNames().contains("intelladb_not_created_yet"), catalog.schemaNames().toString());
+            assertTrue(catalog.schemas().stream().filter(s -> s.name().equals("intelladb_not_created_yet"))
+                    .findFirst().orElseThrow().tables().isEmpty());
+        }
+    }
 }

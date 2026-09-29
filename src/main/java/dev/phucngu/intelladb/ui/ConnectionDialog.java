@@ -1000,15 +1000,19 @@ public final class ConnectionDialog extends DialogWrapper {
         schemaStatus.setText("Loading schemas…");
         withProbe(probe, probe.dialect()::probeSchemaNames, names -> {
             schemaList.clear();
+            int hidden = 0;
             for (String name : names) {
                 boolean isSystem = probe.dialect().isSystemSchema(name);
                 if (isSystem && !showSystemSchemas.isSelected() && !checked.contains(name)) {
+                    hidden++;
                     continue;
                 }
                 boolean selected = checked.isEmpty() ? !isSystem : checked.contains(name);
                 schemaList.addItem(name, isSystem ? name + "  (system)" : name, selected);
             }
-            schemaStatus.setText(" ");
+            schemaStatus.setText(schemaList.getItemsCount() == 0 && hidden > 0
+                    ? "The server has only system schemas (" + hidden + "); tick \"Show internal system schemas\" to list them."
+                    : " ");
         }, error -> {
             schemasLoaded = false;
             schemaStatus.setText("Could not load schemas: " + error);

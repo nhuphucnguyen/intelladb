@@ -85,10 +85,20 @@ public final class MongoDialect implements DbDialect {
         return MongoConnector.databaseNames(config, password);
     }
 
+    /**
+     * The server's databases, plus the connection's own: MongoDB creates a database on its
+     * first write, so a new one isn't listed by the server yet.
+     */
     @Override
     public @NotNull List<String> probeSchemaNames(@NotNull DbConfig config, @Nullable String password)
             throws SQLException {
-        return MongoConnector.databaseNames(config, password);
+        List<String> names = new java.util.ArrayList<>(MongoConnector.databaseNames(config, password));
+        String own = config.database.trim();
+        if (!own.isEmpty() && !names.contains(own)) {
+            names.add(own);
+            names.sort(null);
+        }
+        return names;
     }
 
     @Override
