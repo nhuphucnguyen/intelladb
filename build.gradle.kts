@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "dev.phucngu.intelladb"
-version = "0.2.0"
+version = "0.3.0"
 
 java {
     // The 2026.2 platform is built with Java 25; plugin compilation must match.

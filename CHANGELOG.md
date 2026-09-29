@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 ### Added
 - **MongoDB connections** (driver "MongoDB"), on the bundled MongoDB Java driver. The tree shows
@@ -71,6 +71,8 @@
 - **Delete rows** from the grid: the − button, the context menu or Ctrl+Y / Cmd+Backspace
   marks the selected rows deleted (struck through, red); Submit runs one `DELETE … WHERE
   <key>` per row in the same all-or-nothing unit as the updates, and Revert restores them.
+- **The Schemas tab explains an empty list.** When a server has only system schemas (hidden by
+  default), the tab says so and how to show them, instead of just "Nothing to show".
 
 ## 0.2.0
 
