@@ -15,7 +15,7 @@ Built milestone by milestone, same discipline as the sibling
 | M8 | Visual verification in `runIde` sandbox via computer use (all flows above), bug-fix round: modal-dialog modality, plugin-bundled JDBC driver loading, preset combo labels, connected-state label, AI panel connection fallback | ✅ |
 | M9 | Reasoning-model handling (GLM): empty-answer detection pointing at Max tokens, ping budget 512, default max tokens 2048 — verified against the live Z.ai coding plan | ✅ |
 | M9b | Liquibase: SQL injection into XML `<sql>` blocks + INSERT column↔value caret aid with inline column hints (7 new unit tests) — verified in sandbox | ✅ |
-| M10 | More dialects: MySQL done (M53); SQLite / H2 remaining | in progress |
+| M10 | More dialects: MySQL done (M53), MariaDB done (M59); SQLite / H2 remaining | in progress |
 | M11 | Data editing in the grid: inline edit + UPDATE, Set NULL and row deletion done (M56–M57), CSV export done; adding rows remaining | in progress |
 | M12 | AI: streaming responses, "explain this error", index advice, per-table context menus | planned |
 | M13 | Query history, bookmarks, schema compare | planned |
@@ -28,6 +28,7 @@ Built milestone by milestone, same discipline as the sibling
 | M56 | Inline cell editing in the results grid: rows of one keyed table (PK, else NOT NULL unique key) are editable, pending edits highlighted, Submit (↑ / Ctrl/Cmd+Enter) writes one UPDATE per row all-or-nothing (own transaction under Tx: Auto, savepoint inside a manual one), Revert; base column names via `DbDialect.baseColumnName` | ✅ |
 | M57 | Set NULL (context menu, Ctrl+Alt+N / Cmd+Opt+N) and Delete Rows (−, Ctrl+Y / Cmd+Backspace): deleted rows struck through until Submit, which runs their DELETEs in the same all-or-nothing unit; grid context menu with the edit actions | ✅ |
 | M58 | Global connections: app-level `GlobalConnections` store merged into each project's `ConnectionManager`; Make Global / Make Project (toolbar ↗, context menu, dialog checkbox); sessions stay per project; "Data Sources" dialog listing every connection (Global / Project groups, add per driver, remove, duplicate, ↗ / ↙), edits kept per connection until Apply / OK | ✅ |
+| M59 | MariaDB dialect: `MariaDbDialect extends MySqlDialect` on the same Connector/J (`jdbc:mariadb:` URLs, no RSA key retrieval, sequences / RETURNING / INET6 in the vocabulary), official logo, integration test against MariaDB 11 | ✅ |
 
 ## Verification record (M8)
 

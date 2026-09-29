@@ -1,13 +1,14 @@
 package dev.phucngu.intelladb;
 
 import com.intellij.openapi.util.IconLoader;
+import dev.phucngu.intelladb.connection.MariaDbDialect;
 import dev.phucngu.intelladb.connection.MySqlDialect;
 import dev.phucngu.intelladb.connection.PostgresDialect;
 import javax.swing.Icon;
 
 /**
  * Icons for Intella DB. All are drawn for this plugin except the database product logos
- * (dbPostgres*, dbMysql*), which are the official PostgreSQL and MySQL marks.
+ * (dbPostgres*, dbMysql*, dbMariadb*), which are the official PostgreSQL, MySQL and MariaDB marks.
  */
 public final class IntellaDbIcons {
     public static final Icon TOOL_WINDOW = IconLoader.getIcon("/icons/dbToolWindow.svg", IntellaDbIcons.class);
@@ -17,6 +18,8 @@ public final class IntellaDbIcons {
     public static final Icon POSTGRES_CONNECTED = IconLoader.getIcon("/icons/dbPostgresConnected.svg", IntellaDbIcons.class);
     public static final Icon MYSQL = IconLoader.getIcon("/icons/dbMysql.svg", IntellaDbIcons.class);
     public static final Icon MYSQL_CONNECTED = IconLoader.getIcon("/icons/dbMysqlConnected.svg", IntellaDbIcons.class);
+    public static final Icon MARIADB = IconLoader.getIcon("/icons/dbMariadb.svg", IntellaDbIcons.class);
+    public static final Icon MARIADB_CONNECTED = IconLoader.getIcon("/icons/dbMariadbConnected.svg", IntellaDbIcons.class);
     public static final Icon DATABASE = IconLoader.getIcon("/icons/dbDatabase.svg", IntellaDbIcons.class);
     public static final Icon SCHEMA = IconLoader.getIcon("/icons/dbSchema.svg", IntellaDbIcons.class);
     public static final Icon TABLE = IconLoader.getIcon("/icons/dbTable.svg", IntellaDbIcons.class);
@@ -38,6 +41,7 @@ public final class IntellaDbIcons {
         return switch (dialectId == null ? "" : dialectId) {
             case PostgresDialect.ID -> connected ? POSTGRES_CONNECTED : POSTGRES;
             case MySqlDialect.ID -> connected ? MYSQL_CONNECTED : MYSQL;
+            case MariaDbDialect.ID -> connected ? MARIADB_CONNECTED : MARIADB;
             default -> connected ? CONNECTION_CONNECTED : CONNECTION;
         };
     }

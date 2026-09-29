@@ -29,7 +29,8 @@ by the `GlobalConnections` application service (`intella-db-global.xml`) —
 them, while sessions stay per project; passwords never touch that file — they go to
 `PasswordSafe` under service name "Intella DB", or stay in an in-memory map for
 save-password-off configs. `DbDialect` is the seam for everything database-specific (see
-"Dialects" below); `PostgresDialect` and `MySqlDialect` implement it. `DbSession` wraps a single
+"Dialects" below); `PostgresDialect`, `MySqlDialect` and `MariaDbDialect` (a `MySqlDialect`
+subclass) implement it. `DbSession` wraps a single
 `Connection` (monitor-serialized), materializes `Statement.execute` outcomes into `SqlResult`
 (rows capped at 1000 / update count / message / error).
 
@@ -151,7 +152,7 @@ CursorAnalyzer ──► CursorContext ──► SuggestionEngine ──► List
 
 ## Testing
 
-`MetadataLoaderPostgresTest` and `MetadataLoaderMySqlTest` run against real local servers
+`MetadataLoaderPostgresTest`, `MetadataLoaderMySqlTest` and `MetadataLoaderMariaDbTest` run against real local servers
 (see their javadoc for the environment variables) and are skipped when none is reachable.
 Pure-JVM JUnit tests cover `SqlSplitter`, `DdlGenerator`/`IdentifierQuoting`, the dialects, prompt building
 and SQL-block extraction, and the full `OpenAiCompatibleClient` wire format against a

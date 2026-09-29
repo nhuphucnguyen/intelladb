@@ -22,7 +22,7 @@ import java.util.Set;
  * MySQL through MariaDB Connector/J (LGPL, so it can be bundled; MySQL's own driver is GPL).
  * A MySQL "database" is a JDBC catalog and is shown as a schema under the connection.
  */
-public final class MySqlDialect implements DbDialect {
+public class MySqlDialect implements DbDialect {
 
     public static final String ID = "mysql";
 
@@ -38,7 +38,7 @@ public final class MySqlDialect implements DbDialect {
             "outer", "primary", "range", "references", "rename", "right", "select", "set", "show", "table",
             "then", "to", "union", "unique", "update", "use", "using", "values", "when", "where", "with");
 
-    private static final SqlVocabulary VOCABULARY = SqlVocabulary.ANSI.plus(
+    static final SqlVocabulary MYSQL_VOCABULARY = SqlVocabulary.ANSI.plus(
             SqlVocabulary.words("auto_increment", "charset", "collate", "div", "duplicate", "engine", "high_priority",
                     "ignore", "interval", "low_priority", "regexp", "rlike", "straight_join", "unsigned", "xor",
                     "zerofill"),
@@ -183,7 +183,7 @@ public final class MySqlDialect implements DbDialect {
 
     @Override
     public @NotNull SqlVocabulary vocabulary() {
-        return VOCABULARY;
+        return MYSQL_VOCABULARY;
     }
 
     @Override

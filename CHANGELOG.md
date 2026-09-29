@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- **MariaDB connections** (driver "MariaDB"), on the bundled MariaDB Connector/J. They work
+  like MySQL connections (databases shown as schemas, the same objects, editing and SSL
+  options), with `jdbc:mariadb://` URLs, the MariaDB logo, and completion that knows
+  MariaDB's own words: `RETURNING`, sequences (`NEXTVAL`, `LASTVAL`, `SETVAL`), `INTERSECT` /
+  `EXCEPT`, and the `INET4` / `INET6` / `UUID` types.
 - **Database logos on connections.** PostgreSQL connections show the PostgreSQL elephant and
   MySQL connections the MySQL dolphin — in the explorer tree, the Services view, the AI
   chat's connection picker and the Data Sources dialog — with a green dot when connected.

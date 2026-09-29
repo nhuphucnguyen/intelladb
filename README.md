@@ -1,7 +1,7 @@
 # Intella DB for IntelliJ IDEA
 
-A free, open-source database client for **IntelliJ IDEA Community** (2026.2+): PostgreSQL
-and MySQL connections, a schema browser, a SQL console with a results grid, and an AI assistant that
+A free, open-source database client for **IntelliJ IDEA Community** (2026.2+): PostgreSQL,
+MySQL and MariaDB connections, a schema browser, a SQL console with a results grid, and an AI assistant that
 answers questions about your database in natural language (NL → SQL).
 
 **Status:** working end-to-end, verified visually in the IDE sandbox — see [ROADMAP.md](ROADMAP.md).
@@ -16,7 +16,7 @@ IntelliJ Platform SDK — plus an AI layer that no stock edition offers in this 
 
 | Area | What you get |
 |------|--------------|
-| Connections | Add/edit/delete PostgreSQL and MySQL connections, per project or global (shared by all projects), Test Connection dialog, passwords in the IDE PasswordSafe (or session-only), SSL toggle, JDBC URL override |
+| Connections | Add/edit/delete PostgreSQL, MySQL and MariaDB connections, per project or global (shared by all projects), Test Connection dialog, passwords in the IDE PasswordSafe (or session-only), SSL toggle, JDBC URL override |
 | Schema browser | Connection → schema → table/view → column tree with types and primary-key markers, metadata refresh, Copy Table/Schema DDL |
 | SQL console | Multi-line editor with SQL highlighting, Ctrl/Cmd+Enter to run, multi-statement scripts (quote/dollar-quote/comment-aware splitter), results grid (first 1000 rows), update counts, timing, server version; edit cells (incl. Set NULL) and delete rows of single-table results with a key, then Submit them back as UPDATE / DELETE |
 | Table data | Double-click any table for a first-200-rows preview grid |
@@ -63,11 +63,13 @@ how the wire format was verified.
 - Java 25 toolchain (the 2026.2 platform itself is built with Java 25), Gradle 9.x,
   IntelliJ Platform Gradle Plugin 2.x
 - Bundled PostgreSQL JDBC driver 42.7.4 and MariaDB Connector/J 3.5.10 (LGPL-2.1, used for
-  MySQL) — no driver install needed
+  MariaDB and MySQL) — no driver install needed
 
 ## Legal notes
 
 - Original implementation; no code or resources taken from IntelliJ IDEA Ultimate.
 - All IntelliJ Platform usage is via the documented SDK / public extension points.
-- "IntelliJ", "PostgreSQL" and "MySQL" are trademarks of their respective owners. All icons in
-  `src/main/resources/icons/` are original designs drawn for this plugin.
+- "IntelliJ", "PostgreSQL", "MySQL" and "MariaDB" are trademarks of their respective owners. The
+  icons in `src/main/resources/icons/` are original designs drawn for this plugin, except the
+  database logos (`dbPostgres*`, `dbMysql*`, `dbMariadb*`), which are the products' official
+  marks, used to identify the database a connection points to.
