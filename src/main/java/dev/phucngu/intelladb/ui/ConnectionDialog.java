@@ -74,6 +74,7 @@ public final class ConnectionDialog extends DialogWrapper {
     private final DbConfig original;   // null when creating
 
     private final JBTextField nameField = new JBTextField();
+    private final JBCheckBox globalBox = new JBCheckBox("Global");
     /** The name follows host and database until the user types their own. */
     private boolean nameEdited;
     private boolean updatingName;
@@ -140,6 +141,7 @@ public final class ConnectionDialog extends DialogWrapper {
         setTitle(original == null ? "New Database Connection" : "Edit Connection '" + original.name + "'");
         init();
         loadFrom(original != null ? original : new DbConfig());
+        globalBox.setSelected(original != null && manager.isGlobal(original.id));
         wireListeners();
         refreshEnabledState();
     }
@@ -163,6 +165,8 @@ public final class ConnectionDialog extends DialogWrapper {
         JPanel nameRow = new JPanel(new BorderLayout(JBUI.scale(8), 0));
         nameRow.add(new JLabel("Name:"), BorderLayout.WEST);
         nameRow.add(nameField, BorderLayout.CENTER);
+        globalBox.setToolTipText("Share this connection with all projects (otherwise it belongs to this project)");
+        nameRow.add(globalBox, BorderLayout.EAST);
         nameRow.setBorder(JBUI.Borders.emptyBottom(8));
 
         JPanel testRow = new JPanel(new HorizontalLayout(JBUI.scale(12)));
@@ -432,7 +436,8 @@ public final class ConnectionDialog extends DialogWrapper {
         if (target.noAuth) {
             password = "";
         }
-        manager.saveConfig(target, password, storageChanged || !password.equals(originalPassword));
+        manager.saveConfig(target, password, storageChanged || !password.equals(originalPassword),
+                globalBox.isSelected());
         super.doOKAction();
     }
 

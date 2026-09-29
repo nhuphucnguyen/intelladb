@@ -16,7 +16,7 @@ IntelliJ Platform SDK — plus an AI layer that no stock edition offers in this 
 
 | Area | What you get |
 |------|--------------|
-| Connections | Add/edit/delete PostgreSQL and MySQL connections, Test Connection dialog, passwords in the IDE PasswordSafe (or session-only), SSL toggle, JDBC URL override |
+| Connections | Add/edit/delete PostgreSQL and MySQL connections, per project or global (shared by all projects), Test Connection dialog, passwords in the IDE PasswordSafe (or session-only), SSL toggle, JDBC URL override |
 | Schema browser | Connection → schema → table/view → column tree with types and primary-key markers, metadata refresh, Copy Table/Schema DDL |
 | SQL console | Multi-line editor with SQL highlighting, Ctrl/Cmd+Enter to run, multi-statement scripts (quote/dollar-quote/comment-aware splitter), results grid (first 1000 rows), update counts, timing, server version; edit cells (incl. Set NULL) and delete rows of single-table results with a key, then Submit them back as UPDATE / DELETE |
 | Table data | Double-click any table for a first-200-rows preview grid |

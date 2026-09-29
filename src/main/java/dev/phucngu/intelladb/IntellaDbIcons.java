@@ -20,6 +20,8 @@ public final class IntellaDbIcons {
     public static final Icon SUBMIT = IconLoader.getIcon("/icons/dbSubmit.svg", IntellaDbIcons.class);
     /** Submit with changes waiting: the same arrow outlined in green. */
     public static final Icon SUBMIT_PENDING = IconLoader.getIcon("/icons/dbSubmitPending.svg", IntellaDbIcons.class);
+    public static final Icon MAKE_GLOBAL = IconLoader.getIcon("/icons/dbMakeGlobal.svg", IntellaDbIcons.class);
+    public static final Icon MAKE_PROJECT = IconLoader.getIcon("/icons/dbMakeProject.svg", IntellaDbIcons.class);
     public static final Icon AI = IconLoader.getIcon("/icons/dbAi.svg", IntellaDbIcons.class);
 
     private IntellaDbIcons() {

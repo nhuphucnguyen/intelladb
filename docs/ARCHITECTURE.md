@@ -23,7 +23,10 @@ with four layers. Everything runs inside one tool window, **DB Explorer**.
 
 **`connection/`** — owns configuration and JDBC.
 `DbConfig` is an XML-serializable POJO stored by the `ConnectionManager` project service
-(`PersistentStateComponent`, `intella-db.xml`); passwords never touch that file — they go to
+(`PersistentStateComponent`, `intella-db.xml`) or, for connections shared by all projects,
+by the `GlobalConnections` application service (`intella-db-global.xml`) —
+`ConnectionManager.configs()` lists both, global first, and `setGlobal` moves one between
+them, while sessions stay per project; passwords never touch that file — they go to
 `PasswordSafe` under service name "Intella DB", or stay in an in-memory map for
 save-password-off configs. `DbDialect` is the seam for everything database-specific (see
 "Dialects" below); `PostgresDialect` and `MySqlDialect` implement it. `DbSession` wraps a single

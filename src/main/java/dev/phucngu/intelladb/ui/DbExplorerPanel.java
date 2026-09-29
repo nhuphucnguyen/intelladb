@@ -15,6 +15,7 @@ import com.intellij.openapi.ui.SimpleToolWindowPanel;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ui.JBUI;
+import dev.phucngu.intelladb.IntellaDbIcons;
 import dev.phucngu.intelladb.connection.ConnectionManager;
 import dev.phucngu.intelladb.connection.DbConfig;
 import dev.phucngu.intelladb.connection.DbSession;
@@ -114,6 +115,32 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
             @Override
             public void update(@NotNull AnActionEvent e) {
                 e.getPresentation().setEnabled(treePanel.selectedConfig() != null);
+            }
+        });
+        group.add(new AnAction("Make Global", "Share the selected connection with all projects",
+                IntellaDbIcons.MAKE_GLOBAL) {
+            @Override
+            public void actionPerformed(@NotNull AnActionEvent e) {
+                DbConfig config = treePanel.selectedConfig();
+                if (config != null) {
+                    manager.setGlobal(config.id, !manager.isGlobal(config.id));
+                }
+            }
+
+            @Override
+            public @NotNull ActionUpdateThread getActionUpdateThread() {
+                return ActionUpdateThread.EDT;
+            }
+
+            @Override
+            public void update(@NotNull AnActionEvent e) {
+                DbConfig config = treePanel.selectedConfig();
+                boolean global = config != null && manager.isGlobal(config.id);
+                e.getPresentation().setEnabled(config != null);
+                e.getPresentation().setText(global ? "Make Project" : "Make Global");
+                e.getPresentation().setDescription(global ? "Keep the selected connection in this project only"
+                        : "Share the selected connection with all projects");
+                e.getPresentation().setIcon(global ? IntellaDbIcons.MAKE_PROJECT : IntellaDbIcons.MAKE_GLOBAL);
             }
         });
         group.addSeparator();

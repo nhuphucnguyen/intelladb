@@ -24,9 +24,10 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Project-level store of saved connections plus the live {@link DbSession}s.
- * Passwords live in the IDE PasswordSafe (or in memory for the session when the
- * user chose not to save them).
+ * Project-level store of saved connections plus the live {@link DbSession}s. The
+ * connections are the project's own plus the {@link GlobalConnections} every project
+ * shares (listed first); sessions are per project either way. Passwords live in the IDE
+ * PasswordSafe (or in memory for the session when the user chose not to save them).
  */
 @Service(Service.Level.PROJECT)
 @State(name = "IntellaDbConnections", storages = @Storage("intella-db.xml"))
@@ -44,6 +45,8 @@ public final class ConnectionManager implements PersistentStateComponent<Connect
     /** Session-only passwords for configs with savePassword=false. */
     private final Map<String, String> memoryPasswords = new HashMap<>();
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
+    private final GlobalConnections globals = GlobalConnections.getInstance();
+    private final Runnable globalsListener = this::globalsChanged;
 
     /** Keep-alive pings and auto-disconnects; checked every few seconds against each session. */
     private final ScheduledFuture<?> housekeeping;
@@ -52,6 +55,7 @@ public final class ConnectionManager implements PersistentStateComponent<Connect
         this.project = project;
         this.housekeeping = AppExecutorUtil.getAppScheduledExecutorService()
                 .scheduleWithFixedDelay(this::housekeep, 5, 5, TimeUnit.SECONDS);
+        globals.addListener(globalsListener);
     }
 
     public static @NotNull ConnectionManager getInstance(@NotNull Project project) {
@@ -71,18 +75,33 @@ public final class ConnectionManager implements PersistentStateComponent<Connect
 
     // ------------------------------------------------------------------ configs
 
+    /** Global connections first, then the project's own. */
     public @NotNull List<DbConfig> configs() {
-        return List.copyOf(state.connections);
+        List<DbConfig> all = new ArrayList<>(globals.configs());
+        all.addAll(state.connections);
+        return List.copyOf(all);
     }
 
     public @Nullable DbConfig findConfig(@NotNull String id) {
-        return state.connections.stream().filter(c -> c.id.equals(id)).findFirst().orElse(null);
+        DbConfig own = state.connections.stream().filter(c -> c.id.equals(id)).findFirst().orElse(null);
+        return own != null ? own : globals.find(id);
     }
 
+    /** Whether the connection is shared by all projects rather than stored in this one. */
+    public boolean isGlobal(@NotNull String id) {
+        return globals.find(id) != null;
+    }
+
+    /** Saves the connection where it already lives (a new one goes to the project). */
     public void saveConfig(@NotNull DbConfig config, @Nullable String password, boolean passwordChanged) {
+        saveConfig(config, password, passwordChanged, isGlobal(config.id));
+    }
+
+    /** Saves the connection globally (all projects) or in this project, moving it if needed. */
+    public void saveConfig(@NotNull DbConfig config, @Nullable String password, boolean passwordChanged,
+                           boolean global) {
         boolean isNew = findConfig(config.id) == null;
-        state.connections.removeIf(c -> c.id.equals(config.id));
-        state.connections.add(config);
+        store(config, global);
         if (isNew || passwordChanged) {
             if (config.savePassword && password != null && !password.isBlank()) {
                 storePassword(config.id, password);
@@ -98,8 +117,38 @@ public final class ConnectionManager implements PersistentStateComponent<Connect
         fireChanged();
     }
 
+    /** Makes a saved connection global (visible in every project) or moves it back into this project. */
+    public void setGlobal(@NotNull String id, boolean global) {
+        DbConfig config = findConfig(id);
+        if (config != null && isGlobal(id) != global) {
+            store(config, global);
+            fireChanged();
+        }
+    }
+
+    private void store(@NotNull DbConfig config, boolean global) {
+        if (global) {
+            state.connections.removeIf(c -> c.id.equals(config.id));
+            globals.put(config);
+        } else {
+            globals.remove(config.id);
+            int index = -1;
+            for (int i = 0; i < state.connections.size(); i++) {
+                if (state.connections.get(i).id.equals(config.id)) {
+                    index = i;
+                }
+            }
+            if (index >= 0) {
+                state.connections.set(index, config);
+            } else {
+                state.connections.add(config);
+            }
+        }
+    }
+
     public void deleteConfig(@NotNull String id) {
         state.connections.removeIf(c -> c.id.equals(id));
+        globals.remove(id);
         memoryPasswords.remove(id);
         clearPassword(id);
         DbSession session = sessions.remove(id);
@@ -234,9 +283,20 @@ public final class ConnectionManager implements PersistentStateComponent<Connect
         }
     }
 
+    /** Another project added, changed or removed a global connection: drop sessions of removed ones. */
+    private void globalsChanged() {
+        for (String id : List.copyOf(sessions.keySet())) {
+            if (findConfig(id) == null) {
+                disconnect(id);
+            }
+        }
+        fireChanged();
+    }
+
     @Override
     public void dispose() {
         housekeeping.cancel(false);
+        globals.removeListener(globalsListener);
     }
 
     public void addListener(@NotNull Runnable listener) {

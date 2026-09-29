@@ -484,7 +484,9 @@ public final class ConnectionTreePanel implements Disposable {
 
     private void deleteConnection(@NotNull DbConfig config) {
         int answer = Messages.showYesNoDialog(project,
-                "Delete connection '" + config.name + "'?", "Intella DB", Messages.getQuestionIcon());
+                "Delete connection '" + config.name + "'?" + (manager.isGlobal(config.id)
+                        ? "\nIt is global: this removes it from all projects." : ""),
+                "Intella DB", Messages.getQuestionIcon());
         if (answer == Messages.YES) {
             manager.deleteConfig(config.id);
             ConsoleStore.getInstance(project).remove(config.id);
@@ -600,6 +602,11 @@ public final class ConnectionTreePanel implements Disposable {
                     com.intellij.icons.AllIcons.Actions.Edit, () -> editConnection(config)));
             group.add(action("Delete Connection…", "Remove this connection",
                     com.intellij.icons.AllIcons.General.Remove, () -> deleteConnection(config)));
+            boolean global = manager.isGlobal(config.id);
+            group.add(action(global ? "Make Project" : "Make Global",
+                    global ? "Keep this connection in this project only" : "Share this connection with all projects",
+                    global ? IntellaDbIcons.MAKE_PROJECT : IntellaDbIcons.MAKE_GLOBAL,
+                    () -> manager.setGlobal(config.id, !global)));
         } else if (entry instanceof DatabaseEntry databaseEntry) {
             group.add(action("Refresh Schema", "Reload metadata",
                     com.intellij.icons.AllIcons.Actions.Refresh, this::refreshSelected));
@@ -709,6 +716,10 @@ public final class ConnectionTreePanel implements Disposable {
                     plain.append(suffix);
                     append(suffix, state != null && state.startsWith("error:")
                             ? SimpleTextAttributes.ERROR_ATTRIBUTES : SimpleTextAttributes.GRAYED_ATTRIBUTES);
+                    if (manager.isGlobal(config.id)) {
+                        plain.append("  · global");
+                        append("  · global", SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES);
+                    }
                     setIcon(connected ? IntellaDbIcons.CONNECTION_CONNECTED : IntellaDbIcons.CONNECTION);
                     DbSession session = manager.session(config.id);
                     SchemaCatalog catalog = session == null ? null : session.catalog();

@@ -20,6 +20,13 @@
   like any other — and **Discard** drops it. Invalid JSON gets a warning but can still be
   applied; JSON that was on one line is stored compact again, so only a real change counts.
 - The Submit arrow turns green while changes are waiting.
+- **Global connections**, shared by every project in the IDE. **Make Global** (↗ in the DB
+  Explorer toolbar, or the connection's context menu) moves a connection out of the project
+  into the IDE-wide store; **Make Project** moves it back. The connection dialog has a
+  *Global* checkbox too, so a new connection can start out global. Global connections are
+  listed first and marked "· global"; each project keeps its own sessions, consoles and
+  history for them, and the saved password is shared. Deleting one removes it everywhere
+  (the confirmation says so).
 - **Set NULL** on the selected cells (context menu, Ctrl+Alt+N / Cmd+Opt+N) — works on
   multi-line values too.
 - **Delete rows** from the grid: the − button, the context menu or Ctrl+Y / Cmd+Backspace
