@@ -141,6 +141,14 @@ public interface DbDialect {
     /** SSL mode names offered in the connection dialog, in display order; the first is the default. */
     @NotNull java.util.List<String> sslModes();
 
+    /**
+     * Whether the session is encrypted, as the server sees it: "yes (TLSv1.3)", "no", or
+     * null when the dialect can't tell.
+     */
+    default @Nullable String sslStatus(@NotNull java.sql.Connection connection) throws java.sql.SQLException {
+        return null;
+    }
+
     // ------------------------------------------------------------------ driver-specific values
 
     /** Converts a driver-specific value object (e.g. PostgreSQL's PGobject) to something displayable. */

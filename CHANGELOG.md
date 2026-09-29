@@ -6,6 +6,10 @@
 - **Database logos on connections.** PostgreSQL connections show the PostgreSQL elephant and
   MySQL connections the MySQL dolphin — in the explorer tree, the Services view, the AI
   chat's connection picker and the Data Sources dialog — with a green dot when connected.
+- **Test Connection shows what it found.** A green check (or a red error icon) and the server
+  version appear next to the link, and a balloon lists the DBMS and its version, identifier
+  case sensitivity, the JDBC driver, the round-trip ping and whether the session actually
+  uses SSL, with **Copy**. Click the status to show the balloon again.
 - **Edit cells in the results grid and save them back.** When a result comes from one table
   that has a primary key (or a unique key over NOT NULL columns) and includes the key
   columns — a table data preview, or a console `SELECT` — double-click a cell (or just start

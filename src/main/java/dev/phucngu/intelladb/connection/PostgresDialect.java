@@ -198,4 +198,16 @@ public final class PostgresDialect implements DbDialect {
             return null;
         }
     }
+
+    /** pg_stat_ssl (9.5+) describes this backend's own connection. */
+    @Override
+    public @Nullable String sslStatus(@NotNull java.sql.Connection connection) throws SQLException {
+        try (var st = connection.createStatement();
+             var rs = st.executeQuery("SELECT ssl, version FROM pg_stat_ssl WHERE pid = pg_backend_pid()")) {
+            if (!rs.next()) {
+                return null;
+            }
+            return rs.getBoolean(1) ? "yes (" + rs.getString(2) + ")" : "no";
+        }
+    }
 }

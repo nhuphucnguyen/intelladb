@@ -229,4 +229,17 @@ public final class MySqlDialect implements DbDialect {
             return null;
         }
     }
+
+    /** Ssl_version is empty for an unencrypted session. */
+    @Override
+    public @Nullable String sslStatus(@NotNull java.sql.Connection connection) throws SQLException {
+        try (var st = connection.createStatement();
+             var rs = st.executeQuery("SHOW SESSION STATUS LIKE 'Ssl_version'")) {
+            if (!rs.next()) {
+                return null;
+            }
+            String version = rs.getString(2);
+            return version == null || version.isEmpty() ? "no" : "yes (" + version + ")";
+        }
+    }
 }

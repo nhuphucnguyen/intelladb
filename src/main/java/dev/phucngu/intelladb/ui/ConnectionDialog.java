@@ -15,7 +15,14 @@ import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
 import com.intellij.openapi.ui.ValidationInfo;
+import com.intellij.openapi.ide.CopyPasteManager;
+import com.intellij.openapi.ui.popup.Balloon;
+import com.intellij.openapi.ui.popup.JBPopupFactory;
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.ui.AnimatedIcon;
 import com.intellij.ui.CheckBoxList;
+import com.intellij.ui.JBColor;
+import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.DocumentAdapter;
 import com.intellij.ui.JBIntSpinner;
 import com.intellij.ui.TitledSeparator;
@@ -35,6 +42,7 @@ import com.intellij.util.ui.FormBuilder;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import dev.phucngu.intelladb.connection.ConnectionManager;
+import dev.phucngu.intelladb.connection.ConnectionTestReport;
 import dev.phucngu.intelladb.connection.DbConfig;
 import dev.phucngu.intelladb.connection.DbDialect;
 import dev.phucngu.intelladb.connection.DbSession;
@@ -56,6 +64,8 @@ import javax.swing.event.PopupMenuListener;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.text.JTextComponent;
 import java.awt.BorderLayout;
+import java.awt.Point;
+import java.awt.datatransfer.StringSelection;
 import java.sql.Connection;
 import java.text.ParseException;
 import java.time.ZoneId;
@@ -175,6 +185,9 @@ public final class ConnectionDialog extends DialogWrapper {
     private final JBTable propertiesTable = new JBTable(propertiesModel);
 
     private final JBLabel testStatus = new JBLabel();
+    /** Re-shows the last test's balloon when the status is clicked; null before the first test. */
+    private @Nullable Runnable showTestResult;
+    private @Nullable Balloon testBalloon;
     private final ActionLink testLink = new ActionLink("Test Connection", (java.awt.event.ActionListener) e -> testConnection());
 
     /**
@@ -243,6 +256,14 @@ public final class ConnectionDialog extends DialogWrapper {
         JPanel testRow = new JPanel(new HorizontalLayout(JBUI.scale(12)));
         testRow.add(testLink);
         testRow.add(testStatus);
+        testStatus.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (showTestResult != null) {
+                    showTestResult.run();
+                }
+            }
+        });
         testRow.setBorder(JBUI.Borders.emptyTop(8));
 
         formPanel.add(nameRow, BorderLayout.NORTH);
@@ -594,8 +615,10 @@ public final class ConnectionDialog extends DialogWrapper {
         } finally {
             loading = false;
         }
+        hideTestBalloon();
+        showTestResult = null;
+        testStatus.setIcon(null);
         testStatus.setText("");
-        testStatus.setToolTipText(null);
         refreshEnabledState();
         if (!nameEdited) {
             updateAutoName();
@@ -962,6 +985,8 @@ public final class ConnectionDialog extends DialogWrapper {
             }
         }, error -> {
             databasesLoaded = false;
+            showTestResult = null;
+            testStatus.setIcon(AllIcons.General.Error);
             testStatus.setText("Could not list databases: " + error);
             testStatus.setForeground(JBUI.CurrentTheme.Label.errorForeground());
         });
@@ -995,23 +1020,75 @@ public final class ConnectionDialog extends DialogWrapper {
             return;
         }
         DbConfig probe = snapshot();
+        hideTestBalloon();
+        showTestResult = null;
+        testStatus.setIcon(AnimatedIcon.Default.INSTANCE);
         testStatus.setText("Testing…");
         testStatus.setForeground(UIUtil.getContextHelpForeground());
-        testStatus.setToolTipText(null);
         testLink.setEnabled(false);
-        withProbe(probe, connection -> {
-            var meta = connection.getMetaData();
-            return meta.getDatabaseProductName() + " " + meta.getDatabaseProductVersion();
-        }, version -> {
-            testStatus.setText(version);
-            testStatus.setForeground(JBUI.CurrentTheme.Label.foreground());
+        withProbe(probe, connection -> ConnectionTestReport.probe(connection, probe.dialect()), report -> {
+            testStatus.setIcon(AllIcons.General.InspectionsOK);
+            testStatus.setText(report.summary());
+            testStatus.setForeground(UIUtil.getContextHelpForeground());
             testLink.setEnabled(true);
+            showTestResult = () -> showTestBalloon(true, report.lines(), report.text());
+            showTestResult.run();
         }, error -> {
+            testStatus.setIcon(AllIcons.General.Error);
             testStatus.setText(error.length() > 80 ? error.substring(0, 80) + "…" : error);
-            testStatus.setToolTipText(error);
             testStatus.setForeground(JBUI.CurrentTheme.Label.errorForeground());
             testLink.setEnabled(true);
+            showTestResult = () -> showTestBalloon(false, List.of(error), error);
+            showTestResult.run();
         });
+    }
+
+    /** The "Succeeded" / "Failed" balloon above the test status, with a Copy link. */
+    private void showTestBalloon(boolean succeeded, @NotNull List<String> lines, @NotNull String copyText) {
+        hideTestBalloon();
+        JBLabel title = new JBLabel(succeeded ? "Succeeded" : "Failed");
+        title.setFont(title.getFont().deriveFont(java.awt.Font.BOLD));
+        title.setForeground(succeeded ? new JBColor(0x208A3C, 0x5FB865) : JBUI.CurrentTheme.Label.errorForeground());
+        ActionLink copy = new ActionLink("Copy");
+        copy.addActionListener(e -> {
+            CopyPasteManager.getInstance().setContents(new StringSelection(copyText));
+            copy.setText("Copied");
+        });
+        JPanel header = new JPanel(new BorderLayout(JBUI.scale(40), 0));
+        header.setOpaque(false);
+        header.add(title, BorderLayout.WEST);
+        header.add(copy, BorderLayout.EAST);
+
+        // Errors can be long: wrap them at a fixed width instead of one very wide line.
+        StringBuilder html = new StringBuilder(succeeded ? "<html>" : "<html><body style='width:" + JBUI.scale(360) + "px'>");
+        for (String line : lines) {
+            html.append(line == null ? "" : StringUtil.escapeXmlEntities(line)).append("<br>");
+        }
+        JBLabel body = new JBLabel(html.toString());
+
+        JPanel content = new JPanel(new BorderLayout(0, JBUI.scale(12)));
+        content.setOpaque(false);
+        content.add(header, BorderLayout.NORTH);
+        content.add(body, BorderLayout.CENTER);
+
+        testBalloon = JBPopupFactory.getInstance().createBalloonBuilder(content)
+                .setFillColor(UIUtil.getListBackground())
+                .setBorderColor(JBColor.border())
+                .setBorderInsets(JBUI.insets(10, 14))
+                .setHideOnClickOutside(true)
+                .setHideOnKeyOutside(true)
+                .setHideOnAction(false)
+                .setAnimationCycle(0)
+                .setDisposable(getDisposable())
+                .createBalloon();
+        testBalloon.show(new RelativePoint(testStatus, new Point(JBUI.scale(8), 0)), Balloon.Position.above);
+    }
+
+    private void hideTestBalloon() {
+        if (testBalloon != null) {
+            testBalloon.hide();
+            testBalloon = null;
+        }
     }
 
     private interface ProbeQuery<T> {
