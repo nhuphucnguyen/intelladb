@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
+
+Released 2026-09-29: MySQL support and SQL completion.
 
 ### Added
 - **SQL completion in the console**, for PostgreSQL and MySQL alike. It knows the clause the
