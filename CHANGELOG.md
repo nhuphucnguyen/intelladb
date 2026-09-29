@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Added
+- **Database logos on connections.** PostgreSQL connections show the PostgreSQL elephant and
+  MySQL connections the MySQL dolphin — in the explorer tree, the Services view, the AI
+  chat's connection picker and the Data Sources dialog — with a green dot when connected.
 - **Edit cells in the results grid and save them back.** When a result comes from one table
   that has a primary key (or a unique key over NOT NULL columns) and includes the key
   columns — a table data preview, or a console `SELECT` — double-click a cell (or just start

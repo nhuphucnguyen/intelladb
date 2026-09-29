@@ -1,13 +1,22 @@
 package dev.phucngu.intelladb;
 
 import com.intellij.openapi.util.IconLoader;
+import dev.phucngu.intelladb.connection.MySqlDialect;
+import dev.phucngu.intelladb.connection.PostgresDialect;
 import javax.swing.Icon;
 
-/** Original icons for Intella DB (drawn for this plugin, no third-party assets). */
+/**
+ * Icons for Intella DB. All are drawn for this plugin except the database product logos
+ * (dbPostgres*, dbMysql*), which are the official PostgreSQL and MySQL marks.
+ */
 public final class IntellaDbIcons {
     public static final Icon TOOL_WINDOW = IconLoader.getIcon("/icons/dbToolWindow.svg", IntellaDbIcons.class);
     public static final Icon CONNECTION = IconLoader.getIcon("/icons/dbConnection.svg", IntellaDbIcons.class);
     public static final Icon CONNECTION_CONNECTED = IconLoader.getIcon("/icons/dbConnectionConnected.svg", IntellaDbIcons.class);
+    public static final Icon POSTGRES = IconLoader.getIcon("/icons/dbPostgres.svg", IntellaDbIcons.class);
+    public static final Icon POSTGRES_CONNECTED = IconLoader.getIcon("/icons/dbPostgresConnected.svg", IntellaDbIcons.class);
+    public static final Icon MYSQL = IconLoader.getIcon("/icons/dbMysql.svg", IntellaDbIcons.class);
+    public static final Icon MYSQL_CONNECTED = IconLoader.getIcon("/icons/dbMysqlConnected.svg", IntellaDbIcons.class);
     public static final Icon DATABASE = IconLoader.getIcon("/icons/dbDatabase.svg", IntellaDbIcons.class);
     public static final Icon SCHEMA = IconLoader.getIcon("/icons/dbSchema.svg", IntellaDbIcons.class);
     public static final Icon TABLE = IconLoader.getIcon("/icons/dbTable.svg", IntellaDbIcons.class);
@@ -23,6 +32,15 @@ public final class IntellaDbIcons {
     public static final Icon MAKE_GLOBAL = IconLoader.getIcon("/icons/dbMakeGlobal.svg", IntellaDbIcons.class);
     public static final Icon MAKE_PROJECT = IconLoader.getIcon("/icons/dbMakeProject.svg", IntellaDbIcons.class);
     public static final Icon AI = IconLoader.getIcon("/icons/dbAi.svg", IntellaDbIcons.class);
+
+    /** The connection icon for a database product; unknown dialects get the generic cylinder. */
+    public static Icon connection(String dialectId, boolean connected) {
+        return switch (dialectId == null ? "" : dialectId) {
+            case PostgresDialect.ID -> connected ? POSTGRES_CONNECTED : POSTGRES;
+            case MySqlDialect.ID -> connected ? MYSQL_CONNECTED : MYSQL;
+            default -> connected ? CONNECTION_CONNECTED : CONNECTION;
+        };
+    }
 
     private IntellaDbIcons() {
     }

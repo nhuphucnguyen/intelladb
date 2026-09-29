@@ -173,7 +173,7 @@ final class DbServicesPanel extends JPanel implements Disposable {
             Object user = value instanceof DefaultMutableTreeNode node ? node.getUserObject() : null;
             if (user instanceof DbConfig config) {
                 boolean connected = ConnectionManager.getInstance(project).session(config.id) != null;
-                setIcon(connected ? IntellaDbIcons.CONNECTION_CONNECTED : IntellaDbIcons.CONNECTION);
+                setIcon(IntellaDbIcons.connection(config.dialectId, connected));
                 append("@" + config.name, SimpleTextAttributes.REGULAR_ATTRIBUTES);
             } else if (user instanceof SqlConsole) {
                 setIcon(AllIcons.Nodes.Console);

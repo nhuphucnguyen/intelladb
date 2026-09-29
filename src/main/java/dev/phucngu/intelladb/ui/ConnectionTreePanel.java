@@ -719,7 +719,7 @@ public final class ConnectionTreePanel implements Disposable {
                         plain.append("  · global");
                         append("  · global", SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES);
                     }
-                    setIcon(connected ? IntellaDbIcons.CONNECTION_CONNECTED : IntellaDbIcons.CONNECTION);
+                    setIcon(IntellaDbIcons.connection(config.dialectId, connected));
                     DbSession session = manager.session(config.id);
                     SchemaCatalog catalog = session == null ? null : session.catalog();
                     if (catalog != null && config.dialect().namespaces() == NamespaceModel.SCHEMAS_ONLY) {

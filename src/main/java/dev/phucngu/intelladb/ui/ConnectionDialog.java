@@ -271,7 +271,7 @@ public final class ConnectionDialog extends DialogWrapper {
                     return;
                 }
                 Draft draft = (Draft) value;
-                setIcon(IntellaDbIcons.CONNECTION);
+                setIcon(IntellaDbIcons.connection(draft.config.dialectId, false));
                 String name = draft.config.name.isBlank() ? "<unnamed>" : draft.config.name;
                 append(name, draft.saved == null ? SimpleTextAttributes.REGULAR_ITALIC_ATTRIBUTES
                         : SimpleTextAttributes.REGULAR_ATTRIBUTES);

@@ -162,7 +162,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
                     setText(value.name + "  ·  " + value.describe());
                     boolean connected = dev.phucngu.intelladb.connection.ConnectionManager.getInstance(project)
                             .session(value.id) != null;
-                    setIcon(connected ? IntellaDbIcons.CONNECTION_CONNECTED : IntellaDbIcons.CONNECTION);
+                    setIcon(IntellaDbIcons.connection(value.dialectId, connected));
                 }
             }
         });
