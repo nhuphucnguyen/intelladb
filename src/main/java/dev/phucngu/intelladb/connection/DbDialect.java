@@ -65,6 +65,16 @@ public interface DbDialect {
         return new JdbcEngine(config, password);
     }
 
+    /** Whether connecting needs a password, i.e. whether to ask for one when none is saved. */
+    default boolean needsPassword(@NotNull DbConfig config) {
+        return !config.noAuth;
+    }
+
+    /** Whether a new connection starts with "No auth" (servers that usually run without a login). */
+    default boolean noAuthByDefault() {
+        return false;
+    }
+
     /** The connection dialog's Test Connection, on a throwaway connection. */
     default @NotNull ConnectionTestReport testConnection(@NotNull DbConfig config, @Nullable String password)
             throws Exception {

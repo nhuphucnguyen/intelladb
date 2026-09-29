@@ -53,6 +53,21 @@ public final class MongoDialect implements DbDialect {
         throw new SQLException("MongoDB has no JDBC driver; its sessions use the MongoDB Java driver");
     }
 
+    /**
+     * Only with a user: without one the driver sends no credentials (and a URL with
+     * {@code user:password@} carries its own).
+     */
+    @Override
+    public boolean needsPassword(@NotNull DbConfig config) {
+        return !config.noAuth && !config.user.isBlank() && !MongoConnector.url(config).contains("@");
+    }
+
+    /** A local mongod has no access control unless it was turned on. */
+    @Override
+    public boolean noAuthByDefault() {
+        return true;
+    }
+
     @Override
     public @NotNull SessionEngine newEngine(@NotNull DbConfig config, @Nullable String password) {
         return new MongoEngine(config, password);

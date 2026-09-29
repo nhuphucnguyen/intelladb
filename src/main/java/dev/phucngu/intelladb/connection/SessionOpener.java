@@ -75,8 +75,8 @@ public final class SessionOpener {
             action.accept(existing);
             return;
         }
-        if (config.noAuth) {
-            connectInBackground(config, null, action);
+        if (!config.dialect().needsPassword(config)) {
+            connectInBackground(config, null, action); // no login, or one the URL carries
             return;
         }
         // PasswordSafe access must not run on the EDT.

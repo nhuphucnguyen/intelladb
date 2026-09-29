@@ -223,6 +223,7 @@ public final class ConnectionDialog extends DialogWrapper {
         DbConfig config = new DbConfig();
         config.dialectId = dialect.id();
         config.port = dialect.defaultPort();
+        config.noAuth = dialect.noAuthByDefault();
         Draft draft = new Draft(null, config, false);
         drafts.add(draft);
         return draft;
@@ -827,6 +828,9 @@ public final class ConnectionDialog extends DialogWrapper {
                 return;
             }
             portSpinner.setNumber(selectedDialect().defaultPort());
+            if (selectedDialect().noAuthByDefault() && userField.getText().isBlank()) {
+                authCombo.setSelectedIndex(1); // "No auth"
+            }
             fillSslModes(String.valueOf(sslModeCombo.getSelectedItem()));
             fieldsChanged();
         });
