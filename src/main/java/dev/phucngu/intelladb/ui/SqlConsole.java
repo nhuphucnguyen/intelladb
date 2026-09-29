@@ -302,7 +302,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
     @Override
     public void rowsUpdated(@NotNull List<String> statements, @NotNull SqlResult outcome) {
         ConsoleResultsView view = ResultsHub.getInstance(project).viewFor(this);
-        statements.forEach(sql -> view.logStatement(config.name, sql));
+        view.logSubmit(config.name, statements);
         view.logResult(outcome);
     }
 
@@ -569,7 +569,10 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
             ConsoleResultsView view = ResultsHub.getInstance(project).viewFor(SqlConsole.this);
             ApplicationManager.getApplication().executeOnPooledThread(() -> {
                 SqlResult result = commit ? session.commit() : session.rollback();
-                edt(() -> view.logResult(result));
+                edt(() -> {
+                    view.logStatement(config.name, commit ? "COMMIT" : "ROLLBACK");
+                    view.logResult(result);
+                });
             });
         }
 

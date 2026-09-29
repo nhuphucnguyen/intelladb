@@ -94,37 +94,79 @@ final class ConsoleResultsView implements Disposable {
     }
 
     // ------------------------------------------------------------------ output log
+    //
+    // One block per execution, a blank line between blocks:
+    //
+    //   -- 2026-09-29 18:50:02 · localhost · SELECT first_name, last_name FROM actor WHERE a…
+    //      200 rows retrieved starting from 1 in 12 ms
+    //
+    // The header shows the statement's start on one line; the outcome is indented below it.
 
+    /** Header characters of the statement shown; the rest is cut with "…". */
+    private static final int HEADER_SQL_CHARS = 60;
+    private static final String INDENT = "   ";
+
+    /** Opens the block of one executed statement. */
     void logStatement(@NotNull String connection, @NotNull String sql) {
-        output.print(connection + "> ", ConsoleViewContentType.SYSTEM_OUTPUT);
-        output.print(sql.strip() + "\n", ConsoleViewContentType.NORMAL_OUTPUT);
+        // A leading "-- what this does" comment would fill the header; show the statement itself.
+        String statement = dev.phucngu.intelladb.util.SqlSplitter.stripLeadingComments(sql,
+                console.config().dialect().splitterOptions());
+        header(connection + " · " + shorten(statement.isBlank() ? sql : statement));
     }
 
-    void logResult(@NotNull SqlResult result) {
-        switch (result.kind) {
-            case ROWS -> log(result.rows.size() + " row" + (result.rows.size() == 1 ? "" : "s")
-                    + " retrieved starting from 1 in " + result.durationMs + " ms"
-                    + (result.truncated ? " (limited to " + SqlResult.MAX_ROWS + ")" : ""), false);
-            case UPDATE_COUNT -> log(result.updateCount + " row" + (result.updateCount == 1 ? "" : "s")
-                    + " affected in " + result.durationMs + " ms", false);
-            case MESSAGE -> log((result.text == null || "OK".equals(result.text) ? "completed" : result.text)
-                    + " in " + result.durationMs + " ms", false);
-            case ERROR -> log(result.text, true);
+    /** Opens the block of a grid Submit, listing its statements in full (they are one line each). */
+    void logSubmit(@NotNull String connection, @NotNull java.util.List<String> statements) {
+        header(connection + " · Submit: " + statements.size() + " statement" + (statements.size() == 1 ? "" : "s"));
+        for (String sql : statements) {
+            output.print(INDENT + sql.strip() + "\n", ConsoleViewContentType.NORMAL_OUTPUT);
         }
     }
 
-    void logInfo(@NotNull String message) {
-        log(message, false);
+    /** Closes the current block with the statement's outcome. */
+    void logResult(@NotNull SqlResult result) {
+        switch (result.kind) {
+            case ROWS -> outcome(result.rows.size() + " row" + (result.rows.size() == 1 ? "" : "s")
+                    + " retrieved starting from 1 in " + result.durationMs + " ms"
+                    + (result.truncated ? " (limited to " + SqlResult.MAX_ROWS + ")" : ""), false);
+            case UPDATE_COUNT -> outcome(result.updateCount + " row" + (result.updateCount == 1 ? "" : "s")
+                    + " affected in " + result.durationMs + " ms", false);
+            case MESSAGE -> outcome((result.text == null || "OK".equals(result.text) ? "completed" : result.text)
+                    + " in " + result.durationMs + " ms", false);
+            case ERROR -> outcome(result.text, true);
+        }
     }
 
+    /** A block of its own for a note that isn't a statement (transaction mode, cancellation). */
+    void logInfo(@NotNull String message) {
+        header(message);
+        output.print("\n", ConsoleViewContentType.NORMAL_OUTPUT);
+    }
+
+    /** A block of its own for an error outside a statement; switches to the Output tab. */
     void logError(@NotNull String message) {
-        log(message, true);
+        header("Error");
+        outcome(message, true);
         selectOutput();
     }
 
-    private void log(@NotNull String message, boolean error) {
-        output.print("[" + LocalDateTime.now().format(TIME) + "] ", ConsoleViewContentType.SYSTEM_OUTPUT);
-        output.print(message + "\n", error ? ConsoleViewContentType.ERROR_OUTPUT : ConsoleViewContentType.NORMAL_OUTPUT);
+    private void header(@NotNull String text) {
+        output.print("-- " + LocalDateTime.now().format(TIME) + " · " + text + "\n", ConsoleViewContentType.SYSTEM_OUTPUT);
+    }
+
+    /** The outcome lines (multi-line messages stay indented), then the blank line ending the block. */
+    private void outcome(@NotNull String message, boolean error) {
+        StringBuilder text = new StringBuilder();
+        for (String line : message.strip().split("\\R")) {
+            text.append(INDENT).append(line).append('\n');
+        }
+        output.print(text.append('\n').toString(),
+                error ? ConsoleViewContentType.ERROR_OUTPUT : ConsoleViewContentType.NORMAL_OUTPUT);
+    }
+
+    /** The statement's first {@link #HEADER_SQL_CHARS} characters on one line, whitespace collapsed. */
+    static @NotNull String shorten(@NotNull String sql) {
+        String line = sql.strip().replaceAll("\\s+", " ");
+        return line.length() <= HEADER_SQL_CHARS ? line : line.substring(0, HEADER_SQL_CHARS).stripTrailing() + "…";
     }
 
     @Override

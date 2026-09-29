@@ -26,6 +26,11 @@
   listed first and marked "· global"; each project keeps its own sessions, consoles and
   history for them, and the saved password is shared. Deleting one removes it everywhere
   (the confirmation says so).
+- **A tidier Output tab.** Each execution is a block of its own: a grey `--` header with the
+  time, the connection and the statement's first 60 characters on one line (leading
+  comments skipped), the outcome indented below it — errors in red, multi-line messages kept
+  aligned — and a blank line before the next block. A grid Submit gets one header with its
+  UPDATE / DELETE statements listed; Commit and Rollback get headers too.
 - **One "Data Sources" dialog for all connections**, as in IntelliJ: Add and Edit open it
   with every connection listed on the left under *Global Data Sources* and *Project Data
   Sources* — the one you right-clicked (or a new one) selected — and its settings on the
