@@ -8,7 +8,8 @@ import java.util.List;
 
 /**
  * Splits a SQL script into individual statements, respecting quotes and comments. What
- * counts as a quote or comment differs per database, hence {@link Options}.
+ * counts as a quote or comment differs per database, hence {@link Options}; the MongoDB
+ * shell's JavaScript-like syntax is one of them.
  */
 public final class SqlSplitter {
 
@@ -19,11 +20,25 @@ public final class SqlSplitter {
      * @param backtickQuotes   backtick-quoted identifiers (MySQL)
      * @param hashComments     {@code # …} line comments (MySQL; an operator in PostgreSQL)
      * @param backslashEscapes a backslash escapes the next character in string literals (MySQL default mode)
+     * @param dashComments     {@code -- …} line comments (SQL; a decrement in JavaScript)
+     * @param slashComments    {@code // …} line comments (the MongoDB shell)
+     * @param newlineEnds      a line break outside brackets ends the statement unless the next
+     *                         line continues it with {@code .} (the MongoDB shell)
      */
     public record Options(boolean dollarQuotes, boolean backtickQuotes, boolean hashComments,
-                          boolean backslashEscapes) {
-        public static final Options POSTGRES = new Options(true, false, false, false);
-        public static final Options MYSQL = new Options(false, true, true, true);
+                          boolean backslashEscapes, boolean dashComments, boolean slashComments,
+                          boolean newlineEnds) {
+        public static final Options POSTGRES = new Options(true, false, false, false, true, false, false);
+        public static final Options MYSQL = new Options(false, true, true, true, true, false, false);
+        public static final Options MONGO = new Options(false, true, false, true, false, true, true);
+
+        /** Whether a line comment starts at {@code i}. */
+        public boolean lineCommentAt(@NotNull CharSequence text, int i) {
+            char c = text.charAt(i);
+            boolean twice = i + 1 < text.length() && text.charAt(i + 1) == c;
+            return (c == '-' && twice && dashComments) || (c == '/' && twice && slashComments)
+                    || (c == '#' && hashComments);
+        }
     }
 
     /**
@@ -55,10 +70,11 @@ public final class SqlSplitter {
         int segmentStart = 0;
         int i = 0;
         int n = script.length();
+        int depth = 0; // (), [] and {} — only tracked where a line break can end a statement
         while (i < n) {
             char c = script.charAt(i);
             // Line comments
-            if ((c == '-' && i + 1 < n && script.charAt(i + 1) == '-') || (c == '#' && options.hashComments())) {
+            if (options.lineCommentAt(script, i)) {
                 int end = script.indexOf('\n', i);
                 if (end < 0) {
                     end = n;
@@ -110,12 +126,41 @@ public final class SqlSplitter {
                 addTrimmed(statements, script, segmentStart, i);
                 i++;
                 segmentStart = i;
+                depth = 0;
                 continue;
+            }
+            if (options.newlineEnds()) {
+                if (c == '(' || c == '[' || c == '{') {
+                    depth++;
+                } else if ((c == ')' || c == ']' || c == '}') && depth > 0) {
+                    depth--;
+                } else if (c == '\n' && depth == 0 && endsAtLineBreak(script, segmentStart, i, options)) {
+                    addTrimmed(statements, script, segmentStart, i);
+                    segmentStart = i + 1;
+                }
             }
             i++;
         }
         addTrimmed(statements, script, segmentStart, n);
         return statements;
+    }
+
+    /**
+     * Whether the line break at {@code newline} ends the statement begun at {@code start}:
+     * not when nothing but comments came before it, when the line ends in an operator that
+     * needs more ({@code . , : ( = + …}), or when the next line starts with {@code .} (a chained call).
+     */
+    private static boolean endsAtLineBreak(@NotNull String script, int start, int newline, @NotNull Options options) {
+        String before = stripLeadingComments(script.substring(start, newline), options).strip();
+        if (before.isEmpty()) {
+            return false;
+        }
+        char last = before.charAt(before.length() - 1);
+        if (".,:([{=+-*/&|?!<>".indexOf(last) >= 0) {
+            return false;
+        }
+        String after = stripLeadingComments(script.substring(newline + 1), options);
+        return after.isEmpty() || after.charAt(0) != '.';
     }
 
     /** The statement without the whitespace and comments before its first token. */
@@ -129,7 +174,7 @@ public final class SqlSplitter {
         while (i < n) {
             if (Character.isWhitespace(sql.charAt(i))) {
                 i++;
-            } else if (sql.startsWith("--", i) || (options.hashComments() && sql.charAt(i) == '#')) {
+            } else if (options.lineCommentAt(sql, i)) {
                 int end = sql.indexOf('\n', i);
                 i = end < 0 ? n : end + 1;
             } else if (sql.startsWith("/*", i)) {

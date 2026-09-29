@@ -1,33 +1,29 @@
 package dev.phucngu.intelladb.connection;
 
-import dev.phucngu.intelladb.schema.MetadataLoader;
 import dev.phucngu.intelladb.schema.SchemaCatalog;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
 
 /**
- * A live JDBC session for one {@link DbConfig}. Single physical connection, serialized
- * with a monitor (a database tool window never issues truly concurrent statements).
+ * A live session for one {@link DbConfig}: a single physical connection (JDBC, or the
+ * MongoDB driver — see {@link SessionEngine}), serialized with a monitor (a database tool
+ * window never issues truly concurrent statements).
  */
 public final class DbSession implements AutoCloseable {
 
     private final DbConfig config;
     private final DbDialect dialect;
-    private final String password;
-    private Connection connection;
+    private final SessionEngine engine;
     private volatile SchemaCatalog catalog;
     private volatile String serverVersion = "";
-    /** Statement currently executing, so {@link #cancel()} can interrupt it from another thread. */
-    private volatile Statement running;
+    /** Whether a statement is executing (keep-alive and auto-disconnect wait for it). */
+    private volatile boolean running;
     /** Last user activity (statements, introspection) — keep-alive pings don't count. */
     private volatile long lastActivity = System.currentTimeMillis();
     private volatile long lastPing = System.currentTimeMillis();
@@ -35,7 +31,7 @@ public final class DbSession implements AutoCloseable {
     public DbSession(@NotNull DbConfig config, @Nullable String password) {
         this.config = config;
         this.dialect = config.dialect();
-        this.password = password;
+        this.engine = dialect.newEngine(config, password);
     }
 
     public @NotNull DbConfig config() {
@@ -47,11 +43,7 @@ public final class DbSession implements AutoCloseable {
     }
 
     public boolean isOpen() {
-        try {
-            return connection != null && !connection.isClosed();
-        } catch (SQLException e) {
-            return false;
-        }
+        return engine.isOpen();
     }
 
     public @NotNull String serverVersion() {
@@ -68,16 +60,8 @@ public final class DbSession implements AutoCloseable {
 
     /** Opens the connection if needed. Throws SQLException on failure. */
     public void ensureOpen() throws SQLException {
-        if (isOpen()) {
-            return;
-        }
-        connection = open(config, password, 10);
-        try (Statement st = connection.createStatement();
-             ResultSet rs = st.executeQuery("select version()")) {
-            if (rs.next()) {
-                serverVersion = rs.getString(1);
-            }
-        } catch (SQLException ignored) {
+        if (!isOpen()) {
+            serverVersion = engine.open();
         }
     }
 
@@ -151,50 +135,31 @@ public final class DbSession implements AutoCloseable {
     }
 
     public boolean isBusy() {
-        return running != null;
+        return running;
     }
 
     /** Keep-alive round trip; not user activity, so it doesn't hold off auto-disconnect. */
     public synchronized void ping() {
         lastPing = System.currentTimeMillis();
-        if (!isOpen()) {
-            return;
-        }
-        try (Statement st = connection.createStatement()) {
-            st.execute("SELECT 1");
-        } catch (SQLException ignored) {
-            // A dead connection shows up on the next real statement, which reconnects.
-        }
+        engine.ping();
     }
 
     /**
-     * Executes a single statement and materializes the outcome.
-     * Must not be called on the EDT.
+     * Executes a single statement (SQL, or a MongoDB shell command) and materializes the
+     * outcome. Must not be called on the EDT.
      */
     public synchronized @NotNull SqlResult execute(@NotNull String sql) {
         long start = System.currentTimeMillis();
         lastActivity = start;
         try {
             ensureOpen();
-            try (Statement st = connection.createStatement()) {
-                running = st;
-                boolean hasResultSet = st.execute(sql);
-                long duration = System.currentTimeMillis() - start;
-                if (hasResultSet) {
-                    try (ResultSet rs = st.getResultSet()) {
-                        return materialize(sql, rs, duration, dialect);
-                    }
-                }
-                long count = st.getLargeUpdateCount();
-                return count >= 0
-                        ? SqlResult.update(sql, count, duration)
-                        : SqlResult.message(sql, "OK", duration);
-            }
+            running = true;
+            return engine.execute(sql);
         } catch (SQLException e) {
             return SqlResult.error(sql, e.getMessage() == null ? e.toString() : e.getMessage(),
                     System.currentTimeMillis() - start);
         } finally {
-            running = null;
+            running = false;
             lastActivity = System.currentTimeMillis();
         }
     }
@@ -204,24 +169,18 @@ public final class DbSession implements AutoCloseable {
      * synchronized: {@link #execute} holds the monitor for the whole statement.
      */
     public void cancel() {
-        Statement statement = running;
-        if (statement != null) {
-            try {
-                statement.cancel();
-            } catch (SQLException ignored) {
-            }
+        if (running) {
+            engine.cancel();
         }
     }
 
     /**
      * Switches between auto-commit ("Tx: Auto") and manual transactions ("Tx: Manual").
-     * Per JDBC, turning auto-commit back on commits the pending transaction.
+     * Turning auto-commit back on commits the pending transaction.
      */
     public synchronized void setAutoCommit(boolean autoCommit) throws SQLException {
         ensureOpen();
-        if (connection.getAutoCommit() != autoCommit) {
-            connection.setAutoCommit(autoCommit);
-        }
+        engine.setAutoCommit(autoCommit);
     }
 
     public synchronized @NotNull SqlResult commit() {
@@ -233,153 +192,46 @@ public final class DbSession implements AutoCloseable {
     }
 
     private @NotNull SqlResult endTransaction(@NotNull String label, boolean commit) {
-        long start = System.currentTimeMillis();
         try {
             ensureOpen();
-            if (connection.getAutoCommit()) {
-                return SqlResult.message(label, "Nothing to " + label + " (auto-commit is on)", 0);
-            }
-            if (commit) {
-                connection.commit();
-            } else {
-                connection.rollback();
-            }
-            return SqlResult.message(label, label.substring(0, 1).toUpperCase() + label.substring(1) + " completed",
-                    System.currentTimeMillis() - start);
         } catch (SQLException e) {
-            return SqlResult.error(label, e.getMessage() == null ? e.toString() : e.getMessage(),
-                    System.currentTimeMillis() - start);
+            return SqlResult.error(label, e.getMessage() == null ? e.toString() : e.getMessage(), 0);
         }
+        return commit ? engine.commit() : engine.rollback();
     }
 
     /**
-     * Runs the UPDATEs / DELETEs of edited grid rows as one unit: each must change exactly one row, or
-     * none of them stick. With auto-commit on they get their own transaction; inside a
-     * manual transaction they are undone to a savepoint on failure and otherwise stay
-     * pending until the user commits. Must not be called on the EDT.
+     * Runs the UPDATEs / DELETEs of edited grid rows as one unit: each must change exactly
+     * one row, or none of them stick (see the engine for how). Must not be called on the EDT.
      */
     public synchronized @NotNull SqlResult applyRowUpdates(@NotNull List<String> statements) {
         long start = System.currentTimeMillis();
         lastActivity = start;
-        String sql = String.join(";\n", statements);
         try {
             ensureOpen();
-            boolean autoCommit = connection.getAutoCommit();
-            java.sql.Savepoint savepoint = autoCommit ? null : connection.setSavepoint();
-            if (autoCommit) {
-                connection.setAutoCommit(false);
-            }
-            try {
-                try (Statement st = connection.createStatement()) {
-                    running = st;
-                    for (String update : statements) {
-                        long count = st.executeLargeUpdate(update);
-                        if (count != 1) {
-                            throw new SQLException((count == 0 ? "No row matched (changed or deleted meanwhile?)"
-                                    : count + " rows matched instead of one") + ": " + update);
-                        }
-                    }
-                }
-                if (autoCommit) {
-                    connection.commit();
-                } else {
-                    try {
-                        connection.releaseSavepoint(savepoint);
-                    } catch (SQLException unsupported) {
-                        // Harmless: the savepoint ends with the transaction anyway.
-                    }
-                }
-            } catch (SQLException e) {
-                try {
-                    if (autoCommit) {
-                        connection.rollback();
-                    } else {
-                        connection.rollback(savepoint);
-                    }
-                } catch (SQLException ignored) {
-                }
-                throw e;
-            } finally {
-                if (autoCommit) {
-                    connection.setAutoCommit(true);
-                }
-            }
-            int n = statements.size();
-            return SqlResult.message(sql, n + " row" + (n == 1 ? "" : "s") + " changed"
-                    + (autoCommit ? "" : " (pending: commit the transaction to keep the changes)"),
-                    System.currentTimeMillis() - start);
+            running = true;
+            return engine.applyRowUpdates(statements);
         } catch (SQLException e) {
-            return SqlResult.error(sql, e.getMessage() == null ? e.toString() : e.getMessage(),
-                    System.currentTimeMillis() - start);
+            return SqlResult.error(String.join(";\n", statements),
+                    e.getMessage() == null ? e.toString() : e.getMessage(), System.currentTimeMillis() - start);
         } finally {
-            running = null;
+            running = false;
             lastActivity = System.currentTimeMillis();
         }
-    }
-
-    private static @NotNull SqlResult materialize(@NotNull String sql, @NotNull ResultSet rs,
-                                                  long duration, @NotNull DbDialect dialect) throws SQLException {
-        ResultSetMetaData meta = rs.getMetaData();
-        int columnCount = meta.getColumnCount();
-        List<String> columns = new ArrayList<>(columnCount);
-        List<String> types = new ArrayList<>(columnCount);
-        for (int i = 1; i <= columnCount; i++) {
-            columns.add(meta.getColumnLabel(i));
-            String type = meta.getColumnTypeName(i);
-            types.add(type == null ? "" : type);
-        }
-        List<Object[]> rows = new ArrayList<>();
-        boolean[] binary = new boolean[columnCount];
-        boolean truncated = false;
-        while (rs.next()) {
-            if (rows.size() >= SqlResult.MAX_ROWS) {
-                truncated = true;
-                break;
-            }
-            Object[] row = new Object[columnCount];
-            for (int i = 1; i <= columnCount; i++) {
-                Object value = rs.getObject(i);
-                row[i - 1] = switch (value) {
-                    case byte[] bytes -> {
-                        binary[i - 1] = true;
-                        yield "<binary " + bytes.length + "B>";
-                    }
-                    case null -> null;
-                    default -> dialect.displayValue(value);
-                };
-            }
-            rows.add(row);
-        }
-        String[] source = dialect.sourceTable(meta, columnCount);
-        if (source == null) {
-            return SqlResult.rows(sql, columns, types, rows, truncated, duration);
-        }
-        List<String> sourceColumns = new ArrayList<>(columnCount);
-        for (int i = 1; i <= columnCount; i++) {
-            String base = binary[i - 1] ? null : dialect.baseColumnName(meta, i);
-            sourceColumns.add(base == null || base.isEmpty() ? null : base);
-        }
-        return SqlResult.rows(sql, columns, types, rows, truncated, duration, source[0], source[1], sourceColumns);
     }
 
     /** Reloads the schema catalog in the background of the caller's thread. */
     public synchronized @NotNull SchemaCatalog loadCatalog() throws SQLException {
         ensureOpen();
         lastActivity = System.currentTimeMillis();
-        SchemaCatalog fresh = MetadataLoader.load(connection, dialect, config.schemas, config.showSystemSchemas);
+        SchemaCatalog fresh = engine.loadCatalog();
         catalog = fresh;
         return fresh;
     }
 
     @Override
     public synchronized void close() {
-        if (connection != null) {
-            try {
-                connection.close();
-            } catch (SQLException ignored) {
-            }
-            connection = null;
-            catalog = null;
-        }
+        engine.close();
+        catalog = null;
     }
 }

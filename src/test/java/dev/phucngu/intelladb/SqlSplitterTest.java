@@ -126,4 +126,35 @@ class SqlSplitterTest {
     void mysqlStripsHashCommentsBeforeTheStatement() {
         assertEquals("select 1", SqlSplitter.stripLeadingComments("# note\n select 1", SqlSplitter.Options.MYSQL));
     }
+
+    @Test
+    void mongoShellStatementsEndAtLineBreaks() {
+        String script = """
+                // pets older than two
+                db.pets.find({
+                  age: {$gt: 2}   // inside braces a line break continues
+                })
+                  .sort({name: 1})
+                  .limit(5)
+                use shop
+                db.owners.insertOne({name: "x -- not a comment", url: "http://a/b"}); db.owners.countDocuments()
+                db.a.updateOne({_id: 1},
+                  {$set: {n: 1}})
+                """;
+        List<String> statements = SqlSplitter.split(script, SqlSplitter.Options.MONGO);
+        assertEquals(List.of(
+                "// pets older than two\ndb.pets.find({\n  age: {$gt: 2}   // inside braces a line break continues\n})\n  .sort({name: 1})\n  .limit(5)",
+                "use shop",
+                "db.owners.insertOne({name: \"x -- not a comment\", url: \"http://a/b\"})",
+                "db.owners.countDocuments()",
+                "db.a.updateOne({_id: 1},\n  {$set: {n: 1}})"), statements);
+    }
+
+    @Test
+    void mongoStatementAtCaret() {
+        String script = "db.a.find()\n\ndb.b.find()\n  .limit(1)\n";
+        assertEquals("db.b.find()\n  .limit(1)", SqlSplitter.at(script, script.indexOf("limit"), SqlSplitter.Options.MONGO).text());
+        assertEquals("db.a.find()", SqlSplitter.at(script, 3, SqlSplitter.Options.MONGO).text());
+        assertEquals("db.a.find()", SqlSplitter.stripLeadingComments("// x\n/* y */ db.a.find()", SqlSplitter.Options.MONGO));
+    }
 }

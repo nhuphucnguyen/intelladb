@@ -42,12 +42,9 @@ import com.intellij.util.ui.FormBuilder;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import dev.phucngu.intelladb.connection.ConnectionManager;
-import dev.phucngu.intelladb.connection.ConnectionTestReport;
 import dev.phucngu.intelladb.connection.DbConfig;
 import dev.phucngu.intelladb.connection.DbDialect;
-import dev.phucngu.intelladb.connection.DbSession;
 import dev.phucngu.intelladb.connection.Dialects;
-import dev.phucngu.intelladb.schema.MetadataLoader;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -66,7 +63,6 @@ import javax.swing.text.JTextComponent;
 import java.awt.BorderLayout;
 import java.awt.Point;
 import java.awt.datatransfer.StringSelection;
-import java.sql.Connection;
 import java.text.ParseException;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -970,7 +966,7 @@ public final class ConnectionDialog extends DialogWrapper {
             probe.database = probe.dialect().maintenanceDatabase();
             probe.jdbcUrlOverride = "";
         }
-        withProbe(probe, connection -> probe.dialect().listDatabases(connection), names -> {
+        withProbe(probe, probe.dialect()::probeDatabases, names -> {
             updatingDatabases = true;
             try {
                 databaseCombo.setModel(new DefaultComboBoxModel<>(names.toArray(String[]::new)));
@@ -998,7 +994,7 @@ public final class ConnectionDialog extends DialogWrapper {
         DbConfig probe = snapshot();
         Set<String> checked = new HashSet<>(checkedSchemas());
         schemaStatus.setText("Loading schemas…");
-        withProbe(probe, connection -> MetadataLoader.schemaNames(connection, probe.dialect()), names -> {
+        withProbe(probe, probe.dialect()::probeSchemaNames, names -> {
             schemaList.clear();
             for (String name : names) {
                 boolean isSystem = probe.dialect().isSystemSchema(name);
@@ -1026,7 +1022,7 @@ public final class ConnectionDialog extends DialogWrapper {
         testStatus.setText("Testing…");
         testStatus.setForeground(UIUtil.getContextHelpForeground());
         testLink.setEnabled(false);
-        withProbe(probe, connection -> ConnectionTestReport.probe(connection, probe.dialect()), report -> {
+        withProbe(probe, probe.dialect()::testConnection, report -> {
             testStatus.setIcon(AllIcons.General.InspectionsOK);
             testStatus.setText(report.summary());
             testStatus.setForeground(UIUtil.getContextHelpForeground());
@@ -1091,13 +1087,14 @@ public final class ConnectionDialog extends DialogWrapper {
         }
     }
 
+    /** Asks the server something over a throwaway connection (see the dialect's probe methods). */
     private interface ProbeQuery<T> {
-        T run(@NotNull Connection connection) throws Exception;
+        T run(@NotNull DbConfig probe, @Nullable String password) throws Exception;
     }
 
     /**
-     * Opens a throwaway connection with the dialog's current settings on a pooled thread and
-     * hands the query result (or error message) back on the EDT.
+     * Runs a query over a throwaway connection with the dialog's current settings on a pooled
+     * thread and hands the result (or error message) back on the EDT.
      */
     private <T> void withProbe(@NotNull DbConfig probe, @NotNull ProbeQuery<T> query,
                                @NotNull Consumer<T> onSuccess, @NotNull Consumer<String> onError) {
@@ -1105,8 +1102,8 @@ public final class ConnectionDialog extends DialogWrapper {
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             T result = null;
             String error = null;
-            try (Connection connection = DbSession.open(probe, password, 5)) {
-                result = query.run(connection);
+            try {
+                result = query.run(probe, password);
             } catch (Exception ex) {
                 error = ex.getMessage() == null ? ex.toString() : ex.getMessage();
             }

@@ -29,7 +29,7 @@ public record TableRef(@NotNull DbConfig config, @NotNull String schema, @NotNul
             panel.showMessage("Not connected. Connect '" + config.name + "' first.");
             return;
         }
-        String sql = config.dialect().limit("SELECT * FROM " + qualifiedName(), 200);
+        String sql = config.dialect().previewStatement(schema, meta.name, 200);
         panel.showRunning();
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             dev.phucngu.intelladb.connection.SqlResult result = session.execute(sql);

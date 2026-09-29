@@ -686,7 +686,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
                     if (generation == chatGeneration) { // still the same conversation
                         // Shared with the model along with the next question on this connection.
                         pendingResults.computeIfAbsent(forConfig.id, k -> new ArrayList<>())
-                                .add(AiAssistant.describeResult(sql, result));
+                                .add(AiAssistant.describeResult(sql, result, forConfig.dialect()));
                     }
                     refreshTranscript();
                 });
@@ -706,18 +706,18 @@ public final class AiChatPanel extends JPanel implements Disposable {
         toolWindow.activate(() -> {
             for (var content : toolWindow.getContentManager().getContents()) {
                 if (content.getComponent() instanceof DbExplorerPanel explorer) {
-                    explorer.openConsole(forConfig).appendSql(promptComment(question), sql.strip());
+                    explorer.openConsole(forConfig).appendSql(promptComment(question, forConfig.dialect().lineComment()), sql.strip());
                 }
             }
         });
     }
 
-    /** {@code -- AI Assistant: <prompt>}, one comment line per prompt line. */
-    static @NotNull String promptComment(@NotNull String question) {
+    /** {@code -- AI Assistant: <prompt>}, one comment line per prompt line ({@code //} for MongoDB). */
+    static @NotNull String promptComment(@NotNull String question, @NotNull String lineComment) {
         StringBuilder comment = new StringBuilder();
         String[] lines = question.strip().split("\\R");
         for (int i = 0; i < lines.length; i++) {
-            comment.append(i == 0 ? "-- AI Assistant: " : "--   ").append(lines[i].strip()).append('\n');
+            comment.append(lineComment).append(i == 0 ? " AI Assistant: " : "   ").append(lines[i].strip()).append('\n');
         }
         return comment.toString();
     }

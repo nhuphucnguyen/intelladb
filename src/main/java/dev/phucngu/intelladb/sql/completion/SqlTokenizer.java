@@ -41,7 +41,7 @@ final class SqlTokenizer {
             char c = text.charAt(i);
             if (Character.isWhitespace(c)) {
                 i++;
-            } else if ((c == '-' && i + 1 < n && text.charAt(i + 1) == '-') || (c == '#' && options.hashComments())) {
+            } else if (options.lineCommentAt(text, i)) {
                 int end = text.indexOf('\n', i);
                 end = end < 0 ? n : end;
                 tokens.add(new Token(Type.COMMENT, i, end, text.substring(i, end), true));

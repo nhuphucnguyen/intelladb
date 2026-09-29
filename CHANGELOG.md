@@ -3,6 +3,22 @@
 ## Unreleased
 
 ### Added
+- **MongoDB connections** (driver "MongoDB"), on the bundled MongoDB Java driver. The tree shows
+  databases → collections (and views) → the fields found in a sample of their documents, with
+  their BSON types, plus indexes. The console speaks the MongoDB shell: `use`, `show dbs` /
+  `collections`, `db.pets.find({…}).sort({…}).limit(…)`, `findOne`, `aggregate`,
+  `countDocuments`, `distinct`, `insertOne` / `insertMany`, `updateOne` / `updateMany`,
+  `replaceOne`, `deleteOne` / `deleteMany`, `findOneAndUpdate` and friends, index commands,
+  `explain()`, `db.runCommand` and more — with `ObjectId("…")`, `ISODate("…")`, regexes and
+  unquoted keys as in mongosh, its own highlighting, and completion of collections, methods,
+  fields, query and update operators, pipeline stages, accumulators and `"$field"` paths.
+  Documents appear as grid rows (nested values as JSON you can open in the viewer); results of
+  a `find` are editable like SQL results: edits and deletions are written back by `_id` with
+  `updateOne` / `deleteOne`, keeping each field's type. Tx: Manual runs multi-document
+  transactions on replica sets, read-only connections refuse writes, Cancel kills the running
+  operation, Test Connection shows the server version and topology, and the AI assistant
+  answers with mongosh commands. Driver properties become connection-string options
+  (`authSource`, `replicaSet`…); a pasted `mongodb+srv://` URL works too.
 - **MariaDB connections** (driver "MariaDB"), on the bundled MariaDB Connector/J. They work
   like MySQL connections (databases shown as schemas, the same objects, editing and SSL
   options), with `jdbc:mariadb://` URLs, the MariaDB logo, and completion that knows

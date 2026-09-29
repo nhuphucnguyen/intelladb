@@ -27,12 +27,14 @@ import com.intellij.testFramework.LightVirtualFile;
 import com.intellij.ui.JBColor;
 import com.intellij.util.ui.JBUI;
 import dev.phucngu.intelladb.IntellaDbIcons;
+import dev.phucngu.intelladb.connection.ConsoleLanguage;
 import dev.phucngu.intelladb.connection.DbConfig;
 import dev.phucngu.intelladb.connection.DbDialect;
 import dev.phucngu.intelladb.connection.DbSession;
 import dev.phucngu.intelladb.connection.NamespaceModel;
 import dev.phucngu.intelladb.connection.SqlResult;
 import dev.phucngu.intelladb.history.QueryHistory;
+import dev.phucngu.intelladb.mongo.MongoShellLanguage;
 import dev.phucngu.intelladb.schema.SchemaCatalog;
 import dev.phucngu.intelladb.sql.IntellaSqlFileType;
 import dev.phucngu.intelladb.sql.SqlColumnValueAid;
@@ -105,12 +107,19 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         this.explorer = explorer;
         this.config = config;
         this.txMode = config.autoCommit ? TxMode.AUTO : TxMode.MANUAL;
-        this.file = new LightVirtualFile("console.sql", IntellaSqlFileType.INSTANCE,
+        DbDialect dialect = config.dialect();
+        boolean mongo = dialect.consoleLanguage() == ConsoleLanguage.MONGO_SHELL;
+        this.file = mongo
+                ? new LightVirtualFile("console.mongodb", MongoShellLanguage.FileType.INSTANCE,
+                "// MongoDB shell for " + config.describe() + ", e.g. db.collection.find({})\n")
+                : new LightVirtualFile("console.sql", IntellaSqlFileType.INSTANCE,
                 "-- SQL for " + config.describe() + "\n");
         file.putUserData(KEY, this);
         file.putUserData(SqlCompletionContributor.SCOPE, this::completionScope);
         this.document = FileDocumentManager.getInstance().getDocument(file);
-        document.putUserData(SqlColumnValueAid.CONSOLE_DOCUMENT, true);
+        if (!mongo) {
+            document.putUserData(SqlColumnValueAid.CONSOLE_DOCUMENT, true); // the INSERT column ↔ value aid
+        }
         this.markers = new ExecutionMarkers(project, document);
         restore();
     }

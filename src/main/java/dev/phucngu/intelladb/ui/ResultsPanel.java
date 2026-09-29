@@ -25,7 +25,6 @@ import dev.phucngu.intelladb.connection.Dialects;
 import dev.phucngu.intelladb.connection.DbSession;
 import dev.phucngu.intelladb.connection.SessionOpener;
 import dev.phucngu.intelladb.connection.SqlResult;
-import dev.phucngu.intelladb.schema.DdlGenerator;
 import dev.phucngu.intelladb.schema.SchemaCatalog;
 import dev.phucngu.intelladb.schema.TableMeta;
 import dev.phucngu.intelladb.util.ResultExporter;
@@ -365,7 +364,7 @@ public final class ResultsPanel extends JPanel {
     /** CREATE TABLE for the result's source table, when the connection's catalog knows it. */
     private @Nullable String ddlFor(@Nullable DbConfig config) {
         SchemaCatalog.Schema source = config == null || result == null ? null : sourceTableMeta(config, result);
-        return source == null ? null : DdlGenerator.generate(new SchemaCatalog(List.of(source)), config.dialect());
+        return source == null ? null : config.dialect().describeSchema(new SchemaCatalog(List.of(source)));
     }
 
     /**
@@ -415,8 +414,9 @@ public final class ResultsPanel extends JPanel {
         boolean[] writable = new boolean[result.columns.size()];
         for (int c = 0; c < writable.length; c++) {
             String base = result.sourceColumn(c);
-            // A column shown twice would get two conflicting edits: leave both read-only.
-            writable[c] = base != null && tableColumns.contains(base) && seen.get(base) == 1;
+            // A column shown twice would get two conflicting edits: leave both read-only. Documents
+            // (schemaless) have no fixed column list: any field of the result can be written.
+            writable[c] = base != null && (dialect().schemaless() || tableColumns.contains(base)) && seen.get(base) == 1;
         }
         editTable = result.qualifiedSource(dialect());
         grid.setWritableColumns(writable, this::editsChanged);
@@ -615,12 +615,17 @@ public final class ResultsPanel extends JPanel {
         List<String> statements = new java.util.ArrayList<>();
         grid.edits().forEach((row, cells) -> {
             java.util.Map<String, Object> changes = new java.util.LinkedHashMap<>();
-            cells.forEach((column, value) -> changes.put(result.sourceColumn(column), value));
-            statements.add(dev.phucngu.intelladb.sql.RowUpdates.update(dialect(), editTable,
-                    new dev.phucngu.intelladb.sql.RowUpdates.Edit(changes, loadedKey(row))));
+            java.util.Map<String, Object> loaded = new java.util.LinkedHashMap<>();
+            Object[] loadedRow = grid.loadedRow(row);
+            cells.forEach((column, value) -> {
+                changes.put(result.sourceColumn(column), value);
+                loaded.put(result.sourceColumn(column), column < loadedRow.length ? loadedRow[column] : null);
+            });
+            statements.add(dialect().updateStatement(result.sourceSchema, result.sourceTable,
+                    new dev.phucngu.intelladb.sql.RowUpdates.Edit(changes, loadedKey(row), loaded)));
         });
         for (int row : grid.deletedRows()) {
-            statements.add(dev.phucngu.intelladb.sql.RowUpdates.delete(dialect(), editTable, loadedKey(row)));
+            statements.add(dialect().deleteStatement(result.sourceSchema, result.sourceTable, loadedKey(row)));
         }
         return statements;
     }

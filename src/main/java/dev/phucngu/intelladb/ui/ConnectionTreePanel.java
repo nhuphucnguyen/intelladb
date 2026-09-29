@@ -31,7 +31,6 @@ import dev.phucngu.intelladb.connection.DbConfig;
 import dev.phucngu.intelladb.connection.DbDialect;
 import dev.phucngu.intelladb.connection.DbSession;
 import dev.phucngu.intelladb.connection.NamespaceModel;
-import dev.phucngu.intelladb.schema.DdlGenerator;
 import dev.phucngu.intelladb.schema.SchemaCatalog;
 import dev.phucngu.intelladb.schema.TableMeta;
 import org.jetbrains.annotations.NotNull;
@@ -564,7 +563,7 @@ public final class ConnectionTreePanel implements Disposable {
     }
 
     private void copyDdl(@NotNull SchemaCatalog catalog, @NotNull DbDialect dialect, @NotNull String what) {
-        CopyPasteManager.getInstance().setContents(new StringSelection(DdlGenerator.generate(catalog, dialect)));
+        CopyPasteManager.getInstance().setContents(new StringSelection(dialect.describeSchema(catalog)));
         NotificationGroupManager.getInstance().getNotificationGroup("IntellaDB")
                 .createNotification(what + " DDL copied to clipboard", NotificationType.INFORMATION)
                 .notify(project);
@@ -739,8 +738,9 @@ public final class ConnectionTreePanel implements Disposable {
                     }
                 }
                 case FolderEntry f -> {
-                    plain.append(f.folder().label);
-                    append(f.folder().label, SimpleTextAttributes.REGULAR_ATTRIBUTES);
+                    String label = f.config().dialect().folderLabel(f.folder().label); // "collections" for MongoDB
+                    plain.append(label);
+                    append(label, SimpleTextAttributes.REGULAR_ATTRIBUTES);
                     if (f.folder().isGroup()) {
                         setIcon(f.folder() == Folder.SERVER_OBJECTS ? AllIcons.Nodes.Services : AllIcons.Nodes.ConfigFolder);
                     } else {

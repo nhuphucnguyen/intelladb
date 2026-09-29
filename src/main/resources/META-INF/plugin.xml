@@ -3,8 +3,9 @@
     <name>Intella DB</name>
     <vendor>community</vendor>
     <description><![CDATA[
-    A lightweight database client for <b>IntelliJ IDEA Community</b>: manage PostgreSQL and MySQL connections,
-    browse schemas/tables/columns, preview table data, run SQL in a console with a results grid,
+    A lightweight database client for <b>IntelliJ IDEA Community</b>: manage PostgreSQL, MySQL, MariaDB and
+    MongoDB connections, browse schemas/tables/columns (databases/collections/fields for MongoDB), preview
+    table data, run SQL — or MongoDB shell commands — in a console with a results grid,
     and ask an AI assistant about your database in natural language (NL → SQL).
     <br><br>
     The AI assistant is provider-agnostic: any OpenAI-compatible endpoint works — Z.ai GLM coding plan,
@@ -46,6 +47,14 @@
                                        implementationClass="dev.phucngu.intelladb.sql.IntellaSqlSyntaxHighlighter$Factory"/>
         <lang.parserDefinition language="IntellaSQL"
                                implementationClass="dev.phucngu.intelladb.sql.IntellaSqlParserDefinition"/>
+
+        <!-- MongoDB console: mongosh commands -->
+        <lang.syntaxHighlighterFactory language="IntellaMongo"
+                                       implementationClass="dev.phucngu.intelladb.mongo.MongoShellHighlighter$Factory"/>
+        <lang.parserDefinition language="IntellaMongo"
+                               implementationClass="dev.phucngu.intelladb.mongo.MongoShellParserDefinition"/>
+        <completion.contributor language="IntellaMongo"
+                                implementationClass="dev.phucngu.intelladb.mongo.MongoCompletionContributor"/>
 
         <!-- Completion: schema objects of the console's connection plus the dialect's keywords/functions -->
         <completion.contributor language="IntellaSQL"

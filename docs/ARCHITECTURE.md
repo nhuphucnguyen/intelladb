@@ -29,10 +29,11 @@ by the `GlobalConnections` application service (`intella-db-global.xml`) —
 them, while sessions stay per project; passwords never touch that file — they go to
 `PasswordSafe` under service name "Intella DB", or stay in an in-memory map for
 save-password-off configs. `DbDialect` is the seam for everything database-specific (see
-"Dialects" below); `PostgresDialect`, `MySqlDialect` and `MariaDbDialect` (a `MySqlDialect`
-subclass) implement it. `DbSession` wraps a single
-`Connection` (monitor-serialized), materializes `Statement.execute` outcomes into `SqlResult`
-(rows capped at 1000 / update count / message / error).
+"Dialects" below); `PostgresDialect`, `MySqlDialect`, `MariaDbDialect` (a `MySqlDialect`
+subclass) and `MongoDialect` implement it. `DbSession` is monitor-serialized and delegates
+to a `SessionEngine` — `JdbcEngine` (one `Connection`, `Statement.execute` outcomes
+materialized into `SqlResult`: rows capped at 1000 / update count / message / error) for
+the SQL dialects, `MongoEngine` for MongoDB (see "MongoDB" below).
 
 **`schema/`** — a snapshot model. `MetadataLoader` walks plain JDBC metadata
 (`getSchemas/getTables/getColumns/getPrimaryKeys`) into a `SchemaCatalog` of immutable
@@ -103,6 +104,41 @@ the PostgreSQL/ANSI behaviour, so a new dialect only overrides what differs:
   table a result set came from, when the driver reports it) and `baseColumnName` (the
   table column behind an aliased result column — pgjdbc needs its own metadata call).
 
+## MongoDB
+
+MongoDB has no JDBC driver, so it plugs in below `DbSession` and above the UI rather than
+through `java.sql`: `MongoDialect.newEngine` returns a `MongoEngine` on the official Java
+driver, and the dialect's probe methods (`testConnection`, `probeDatabases`,
+`probeSchemaNames`) answer the connection dialog. Everything else reuses the SQL paths:
+
+- **Console:** `consoleLanguage()` is `MONGO_SHELL`, so the console file is
+  `MongoShellLanguage` (lexer, highlighter, flat parser) and statements split with
+  `SqlSplitter.Options.MONGO` — `//` comments, and a line break outside brackets ends a
+  statement unless the next line continues it with `.`. `MongoShellParser` turns a statement
+  into `use` / `show` / `db.method()` / `db.coll.method().chain()` with arguments as driver
+  values (relaxed object literals, `ObjectId()`/`ISODate()`/`NumberLong()`…, regex literals,
+  Extended JSON wrappers). `MongoEngine` runs it; documents become rows (one column per
+  top-level field, `_id` first; `MongoValues` gives the grid native values or a `Cell` with
+  the shell text, which parses back). Writes answer with messages ("Matched 1 document…").
+- **Catalog:** `MongoCatalogLoader` maps databases to schemas (`SCHEMAS_ONLY`), collections
+  to tables and views to views, the fields of the first 100 documents to columns (dominant
+  BSON type, nullable when missing somewhere), `_id` to the primary key, unique indexes to
+  keys and all indexes to indexes. `describeSchema` renders it as shell commands with a
+  field comment per collection — Copy DDL and the AI prompt.
+- **Editing:** a `find` names its collection as the rows' source, so `ResultsPanel` makes
+  the grid editable as for SQL (`_id` is the key; `schemaless()` lets any field be written).
+  `MongoDialect.updateStatement` / `deleteStatement` write `updateOne({_id: …}, {$set: …})`
+  / `deleteOne`, typing edited text like the loaded value (`MongoValues.edited`).
+  `applyRowUpdates` checks every filter matches exactly one document before writing, and on a
+  replica set runs them in a transaction.
+- **Transactions, read-only, cancel:** Tx: Manual starts a `ClientSession` transaction for data
+  commands (replica sets and sharded clusters; a standalone server's error says so). Read-only
+  connections refuse writing methods, write commands and `$out`/`$merge` in the engine. Every
+  operation carries a comment tag; Cancel finds it in `$currentOp` and kills it.
+- **Completion:** `MongoCompletion` follows calls, objects and keys up to the caret
+  (collections after `db.`, methods, cursor methods, fields and operators by context —
+  filter, field operators, update, pipeline stage, `$group` accumulators, `"$field"` paths).
+
 ## Editing results
 
 `SqlResult.sourceColumns` names the base column of each result column when the rows come
@@ -115,8 +151,8 @@ WHERE key = …` (`RowUpdates`, string literals the server converts to the colum
 transaction of its own under auto-commit or behind a savepoint inside the user's manual
 transaction.
 
-Only files named `Postgres*.java` / `MySql*.java` may reference `org.postgresql` /
-`org.mariadb` (enforced by `DriverImportGuardTest`). Bundled drivers: pgjdbc
+Only files named `Postgres*.java` / `MySql*.java` / `Mongo*.java` may reference `org.postgresql` /
+`org.mariadb` / `com.mongodb` and `org.bson` (enforced by `DriverImportGuardTest`). Bundled drivers: pgjdbc
 (BSD-2-Clause) and MariaDB Connector/J (LGPL-2.1, chosen for MySQL because MySQL's own
 Connector/J is GPL).
 
@@ -152,7 +188,8 @@ CursorAnalyzer ──► CursorContext ──► SuggestionEngine ──► List
 
 ## Testing
 
-`MetadataLoaderPostgresTest`, `MetadataLoaderMySqlTest` and `MetadataLoaderMariaDbTest` run against real local servers
+`MetadataLoaderPostgresTest`, `MetadataLoaderMySqlTest`, `MetadataLoaderMariaDbTest` and
+`MongoEngineTest` (a standalone server plus a single-node replica set for transactions) run against real local servers
 (see their javadoc for the environment variables) and are skipped when none is reachable.
 Pure-JVM JUnit tests cover `SqlSplitter`, `DdlGenerator`/`IdentifierQuoting`, the dialects, prompt building
 and SQL-block extraction, and the full `OpenAiCompatibleClient` wire format against a

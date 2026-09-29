@@ -63,13 +63,14 @@ public final class SqlCompletionContributor extends CompletionContributor {
         }
     }
 
-    private static @NotNull CompletionScope scopeOf(@NotNull PsiFile file) {
+    public static @NotNull CompletionScope scopeOf(@NotNull PsiFile file) {
         VirtualFile virtualFile = file.getViewProvider().getVirtualFile();
         Supplier<CompletionScope> supplier = virtualFile.getUserData(SCOPE);
         return supplier != null ? supplier.get() : CompletionScope.offline();
     }
 
-    private static @NotNull LookupElementBuilder render(@NotNull Suggestion s) {
+    /** The lookup element for a suggestion; shared with the MongoDB console's completion. */
+    public static @NotNull LookupElementBuilder render(@NotNull Suggestion s) {
         // The inserted text is the main lookup string; the bare name also matches (e.g. "ord" → sales.orders).
         LookupElementBuilder element = LookupElementBuilder.create(s, s.insertText())
                 .withLookupString(s.lookup())

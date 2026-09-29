@@ -17,10 +17,15 @@ import java.util.Map;
 public final class RowUpdates {
 
     /**
-     * One edited row: the new values by base column (in the order to SET them) and the
-     * row's key columns with their loaded values.
+     * One edited row: the new values by base column (in the order to SET them), the row's
+     * key columns with their loaded values, and the loaded values of the changed columns
+     * (so a document database can keep each field's type).
      */
-    public record Edit(@NotNull Map<String, Object> changes, @NotNull Map<String, Object> key) {
+    public record Edit(@NotNull Map<String, Object> changes, @NotNull Map<String, Object> key,
+                       @NotNull Map<String, Object> loaded) {
+        public Edit(@NotNull Map<String, Object> changes, @NotNull Map<String, Object> key) {
+            this(changes, key, Map.of());
+        }
     }
 
     private RowUpdates() {

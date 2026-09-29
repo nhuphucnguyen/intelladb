@@ -60,6 +60,35 @@ public interface DbDialect {
         return null;
     }
 
+    /** What sessions of this dialect run on; JDBC unless the database has no JDBC driver. */
+    default @NotNull SessionEngine newEngine(@NotNull DbConfig config, @Nullable String password) {
+        return new JdbcEngine(config, password);
+    }
+
+    /** The connection dialog's Test Connection, on a throwaway connection. */
+    default @NotNull ConnectionTestReport testConnection(@NotNull DbConfig config, @Nullable String password)
+            throws Exception {
+        try (java.sql.Connection connection = DbSession.open(config, password, 5)) {
+            return ConnectionTestReport.probe(connection, this);
+        }
+    }
+
+    /** The dialog's database dropdown: what the server has, on a throwaway connection. */
+    default @NotNull java.util.List<String> probeDatabases(@NotNull DbConfig config, @Nullable String password)
+            throws Exception {
+        try (java.sql.Connection connection = DbSession.open(config, password, 5)) {
+            return listDatabases(connection);
+        }
+    }
+
+    /** The dialog's Schemas tab: every schema, system ones included, on a throwaway connection. */
+    default @NotNull java.util.List<String> probeSchemaNames(@NotNull DbConfig config, @Nullable String password)
+            throws Exception {
+        try (java.sql.Connection connection = DbSession.open(config, password, 5)) {
+            return dev.phucngu.intelladb.schema.MetadataLoader.schemaNames(connection, this);
+        }
+    }
+
     /** Database to connect to when only listing what the server has (the dialog's dropdown). */
     default @NotNull String maintenanceDatabase() {
         return "";
@@ -134,6 +163,73 @@ public interface DbDialect {
     /** Lexical rules for splitting scripts into statements. */
     default @NotNull SqlSplitter.Options splitterOptions() {
         return SqlSplitter.Options.POSTGRES;
+    }
+
+    // ------------------------------------------------------------------ console language
+
+    /** What the console speaks: SQL, or the MongoDB shell. */
+    default @NotNull ConsoleLanguage consoleLanguage() {
+        return ConsoleLanguage.SQL;
+    }
+
+    /** What the AI assistant is asked to write, e.g. "SQL" or "MongoDB shell (mongosh) commands". */
+    default @NotNull String queryLanguage() {
+        return "SQL";
+    }
+
+    /** Language tag of the fenced code blocks the AI answers with. */
+    default @NotNull String codeFence() {
+        return "sql";
+    }
+
+    /** Line comment marker of the console language. */
+    default @NotNull String lineComment() {
+        return "--";
+    }
+
+    /** The statement a table's data preview runs: the first {@code rows} rows of {@code schema.table}. */
+    default @NotNull String previewStatement(@NotNull String schema, @NotNull String table, int rows) {
+        return limit("SELECT * FROM " + quote(schema) + "." + quote(table), rows);
+    }
+
+    /**
+     * The catalog as source text: CREATE TABLE statements for SQL — what Copy DDL copies
+     * and the AI assistant reads as the schema.
+     */
+    default @NotNull String describeSchema(@NotNull dev.phucngu.intelladb.schema.SchemaCatalog catalog) {
+        return dev.phucngu.intelladb.schema.DdlGenerator.generate(catalog, this);
+    }
+
+    /** What the tree calls a folder of objects: "collections" instead of "tables" for MongoDB. */
+    default @NotNull String folderLabel(@NotNull String label) {
+        return label;
+    }
+
+    // ------------------------------------------------------------------ writing edited rows back
+
+    /**
+     * Whether rows have no fixed set of columns (MongoDB documents): then any field of an
+     * editable result can be written, not just the ones the catalog lists.
+     */
+    default boolean schemaless() {
+        return false;
+    }
+
+    /** The statement that writes one edited row back (an UPDATE for SQL). */
+    default @NotNull String updateStatement(@Nullable String schema, @NotNull String table,
+                                            @NotNull dev.phucngu.intelladb.sql.RowUpdates.Edit edit) {
+        return dev.phucngu.intelladb.sql.RowUpdates.update(this, qualified(schema, table), edit);
+    }
+
+    /** The statement that deletes one row, found by its loaded key (a DELETE for SQL). */
+    default @NotNull String deleteStatement(@Nullable String schema, @NotNull String table,
+                                            @NotNull java.util.Map<String, Object> key) {
+        return dev.phucngu.intelladb.sql.RowUpdates.delete(this, qualified(schema, table), key);
+    }
+
+    /** {@code schema.table}, quoted as needed; just the table without a schema. */
+    default @NotNull String qualified(@Nullable String schema, @NotNull String table) {
+        return schema == null ? quote(table) : quote(schema) + "." + quote(table);
     }
 
     // ------------------------------------------------------------------ connection UI

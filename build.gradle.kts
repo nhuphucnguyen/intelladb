@@ -28,6 +28,8 @@ dependencies {
     // MySQL is reached with MariaDB Connector/J (LGPL-2.1), which speaks the MySQL protocol;
     // MySQL's own Connector/J is GPL and cannot be bundled into this plugin.
     implementation("org.mariadb.jdbc:mariadb-java-client:3.5.10")
+    // MongoDB has no JDBC; its own sync driver (Apache-2.0) backs the MongoDB dialect.
+    implementation("org.mongodb:mongodb-driver-sync:5.13.0")
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

@@ -2,7 +2,6 @@ package dev.phucngu.intelladb.ai;
 
 import dev.phucngu.intelladb.connection.DbDialect;
 import dev.phucngu.intelladb.connection.SqlResult;
-import dev.phucngu.intelladb.schema.DdlGenerator;
 import dev.phucngu.intelladb.schema.SchemaCatalog;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -14,31 +13,40 @@ import java.util.regex.Pattern;
 
 /**
  * Builds prompts and parses answers for the database chat: NL questions answered against
- * the live schema, with SQL in fenced ```sql blocks when a query is needed.
+ * the live schema, with a query in a fenced block when one is needed — ```sql, or
+ * ```javascript with MongoDB shell commands for MongoDB.
  */
 public final class AiAssistant {
 
     public static final Pattern SQL_BLOCK = Pattern.compile(
-            "```\\s*(?:sql|postgresql|postgres|mysql|mariadb)?\\s*\\n(.*?)```", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+            "```\\s*(?:sql|postgresql|postgres|mysql|mariadb|javascript|js|mongodb|mongosh|mongo)?\\s*\\n(.*?)```",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
     /** System prompt establishing the assistant's contract. */
     public static @NotNull ChatMessage systemPrompt(@Nullable SchemaCatalog catalog, boolean includeSchema,
                                                     @NotNull DbDialect dialect) {
         StringBuilder sb = new StringBuilder();
+        String language = dialect.queryLanguage();
+        boolean sql = language.equals("SQL");
         sb.append("You are Intella DB, an assistant embedded in an IntelliJ IDEA database tool window. ")
           .append("The user asks questions about their database in natural language.\n")
           .append("Rules:\n")
-          .append("- If the answer needs data, give a short explanation and then exactly one SQL query ")
-          .append("in a fenced ```sql block. The query must be a single statement, read-only unless the user explicitly asks to modify data.\n")
-          .append("- Write SQL for ").append(dialect.displayName()).append(".\n")
-          .append("- Prefer schema-qualified names (schema.table).\n")
-          .append("- If the question is conceptual or the answer is already in the schema, reply in plain text without a SQL block.\n")
-          .append("- Never invent tables or columns that are not in the schema.\n")
+          .append("- If the answer needs data, give a short explanation and then exactly one ")
+          .append(sql ? "SQL query" : "command").append(" in a fenced ```").append(dialect.codeFence())
+          .append(" block. It must be a single statement, read-only unless the user explicitly asks to modify data.\n")
+          .append("- Write ").append(language).append(" for ").append(dialect.displayName()).append(".\n")
+          .append(sql ? "- Prefer schema-qualified names (schema.table).\n"
+                  : "- Use db.getSiblingDB(\"database\").getCollection(\"collection\") when the database matters; "
+                  + "the console supports find, findOne, aggregate, countDocuments, distinct, insertOne/Many, "
+                  + "updateOne/Many, replaceOne, deleteOne/Many, createIndex, getIndexes and db.runCommand.\n")
+          .append("- If the question is conceptual or the answer is already in the schema, reply in plain text without a code block.\n")
+          .append(sql ? "- Never invent tables or columns that are not in the schema.\n"
+                  : "- Never invent collections that are not in the schema; its fields come from sampled documents, so others may exist.\n")
           .append("- When the user runs one of your queries, its result is included at the start of their next ")
           .append("message under \"Query result\" (possibly truncated). Use it to answer; do not ask them to paste it.\n");
         if (catalog != null && includeSchema && !catalog.isEmpty()) {
-            sb.append("\nDatabase schema (").append(dialect.displayName()).append(" DDL):\n\n")
-              .append(DdlGenerator.generate(catalog, dialect));
+            sb.append("\nDatabase schema (").append(dialect.displayName()).append(sql ? " DDL" : "").append("):\n\n")
+              .append(dialect.describeSchema(catalog));
         } else {
             sb.append("\nNo schema is currently loaded; say so if the question depends on it.\n");
         }
@@ -75,7 +83,15 @@ public final class AiAssistant {
      * {@link #MAX_RESULT_ROWS} rows, long cells shortened), an update count or the error.
      */
     public static @NotNull String describeResult(@NotNull String sql, @NotNull SqlResult result) {
-        StringBuilder sb = new StringBuilder("Query result of:\n```sql\n").append(sql.strip()).append("\n```\n");
+        return describeResult(sql, result, "sql");
+    }
+
+    public static @NotNull String describeResult(@NotNull String sql, @NotNull SqlResult result, @NotNull DbDialect dialect) {
+        return describeResult(sql, result, dialect.codeFence());
+    }
+
+    private static @NotNull String describeResult(@NotNull String sql, @NotNull SqlResult result, @NotNull String fence) {
+        StringBuilder sb = new StringBuilder("Query result of:\n```").append(fence).append('\n').append(sql.strip()).append("\n```\n");
         switch (result.kind) {
             case ROWS -> {
                 int total = result.rows.size();

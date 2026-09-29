@@ -11,8 +11,9 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Driver-specific classes stay behind the dialect: only Postgres*.java may touch pgjdbc
- * and only MySql*.java the MariaDB driver, so the rest of the plugin stays database-neutral.
+ * Driver-specific classes stay behind the dialect: only Postgres*.java may touch pgjdbc,
+ * only MySql*.java the MariaDB driver and only Mongo*.java the MongoDB driver (and BSON),
+ * so the rest of the plugin stays database-neutral.
  */
 class DriverImportGuardTest {
 
@@ -26,6 +27,12 @@ class DriverImportGuardTest {
     @Test
     void onlyMySqlFilesReferenceMariaDbDriver() throws IOException {
         assertEquals(List.of(), offenders("org.mariadb", "MySql"));
+    }
+
+    @Test
+    void onlyMongoFilesReferenceTheMongoDbDriver() throws IOException {
+        assertEquals(List.of(), offenders("com.mongodb", "Mongo"));
+        assertEquals(List.of(), offenders("org.bson", "Mongo"));
     }
 
     private static List<String> offenders(String packagePrefix, String filePrefix) throws IOException {

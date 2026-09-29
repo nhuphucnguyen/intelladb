@@ -4,11 +4,13 @@ import com.intellij.openapi.util.IconLoader;
 import dev.phucngu.intelladb.connection.MariaDbDialect;
 import dev.phucngu.intelladb.connection.MySqlDialect;
 import dev.phucngu.intelladb.connection.PostgresDialect;
+import dev.phucngu.intelladb.mongo.MongoDialect;
 import javax.swing.Icon;
 
 /**
  * Icons for Intella DB. All are drawn for this plugin except the database product logos
- * (dbPostgres*, dbMysql*, dbMariadb*), which are the official PostgreSQL, MySQL and MariaDB marks.
+ * (dbPostgres*, dbMysql*, dbMariadb*, dbMongodb*), which are the official PostgreSQL, MySQL, MariaDB
+ * and MongoDB marks.
  */
 public final class IntellaDbIcons {
     public static final Icon TOOL_WINDOW = IconLoader.getIcon("/icons/dbToolWindow.svg", IntellaDbIcons.class);
@@ -20,6 +22,8 @@ public final class IntellaDbIcons {
     public static final Icon MYSQL_CONNECTED = IconLoader.getIcon("/icons/dbMysqlConnected.svg", IntellaDbIcons.class);
     public static final Icon MARIADB = IconLoader.getIcon("/icons/dbMariadb.svg", IntellaDbIcons.class);
     public static final Icon MARIADB_CONNECTED = IconLoader.getIcon("/icons/dbMariadbConnected.svg", IntellaDbIcons.class);
+    public static final Icon MONGODB = IconLoader.getIcon("/icons/dbMongodb.svg", IntellaDbIcons.class);
+    public static final Icon MONGODB_CONNECTED = IconLoader.getIcon("/icons/dbMongodbConnected.svg", IntellaDbIcons.class);
     public static final Icon DATABASE = IconLoader.getIcon("/icons/dbDatabase.svg", IntellaDbIcons.class);
     public static final Icon SCHEMA = IconLoader.getIcon("/icons/dbSchema.svg", IntellaDbIcons.class);
     public static final Icon TABLE = IconLoader.getIcon("/icons/dbTable.svg", IntellaDbIcons.class);
@@ -42,6 +46,7 @@ public final class IntellaDbIcons {
             case PostgresDialect.ID -> connected ? POSTGRES_CONNECTED : POSTGRES;
             case MySqlDialect.ID -> connected ? MYSQL_CONNECTED : MYSQL;
             case MariaDbDialect.ID -> connected ? MARIADB_CONNECTED : MARIADB;
+            case MongoDialect.ID -> connected ? MONGODB_CONNECTED : MONGODB;
             default -> connected ? CONNECTION_CONNECTED : CONNECTION;
         };
     }

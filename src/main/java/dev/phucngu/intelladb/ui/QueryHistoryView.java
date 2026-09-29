@@ -31,6 +31,7 @@ import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ui.JBUI;
 import dev.phucngu.intelladb.IntellaDbIcons;
 import dev.phucngu.intelladb.connection.ConnectionManager;
+import dev.phucngu.intelladb.connection.ConsoleLanguage;
 import dev.phucngu.intelladb.connection.DbConfig;
 import dev.phucngu.intelladb.connection.SqlResult;
 import dev.phucngu.intelladb.history.QueryHistory;
@@ -74,6 +75,7 @@ final class QueryHistoryView implements Disposable {
     private final JBLabel summary = new JBLabel(" ");
     private final Document sqlDocument = EditorFactory.getInstance().createDocument("");
     private final EditorEx sqlViewer;
+    private com.intellij.openapi.fileTypes.FileType highlightedAs = IntellaSqlFileType.INSTANCE;
     private final ResultsPanel results;
     private final JPanel listSide;
     private final JPanel detailSide;
@@ -336,6 +338,7 @@ final class QueryHistoryView implements Disposable {
             return;
         }
         shown = entry;
+        highlightFor(entry == null ? null : configOf(entry));
         String sql = entry == null ? "" : StringUtil.convertLineSeparators(entry.sql());
         CommandProcessor.getInstance().runUndoTransparentAction(() ->
                 WriteAction.run(() -> sqlDocument.setText(sql)));
@@ -347,6 +350,17 @@ final class QueryHistoryView implements Disposable {
         summary.setText(entry.executedAt().format(TIME) + "  ·  @" + entry.connectionName()
                 + (entry.schema() != null ? "  ·  " + entry.schema() : "") + "  ·  " + outcome(entry.result()));
         results.showResult(entry.result());
+    }
+
+    /** SQL highlighting, or the MongoDB shell's for a MongoDB connection's query. */
+    private void highlightFor(@Nullable DbConfig config) {
+        boolean mongo = config != null && config.dialect().consoleLanguage() == ConsoleLanguage.MONGO_SHELL;
+        com.intellij.openapi.fileTypes.FileType type = mongo
+                ? dev.phucngu.intelladb.mongo.MongoShellLanguage.FileType.INSTANCE : IntellaSqlFileType.INSTANCE;
+        if (highlightedAs != type) {
+            highlightedAs = type;
+            sqlViewer.setHighlighter(EditorHighlighterFactory.getInstance().createEditorHighlighter(project, type));
+        }
     }
 
     private void openInConsole() {

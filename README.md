@@ -1,8 +1,9 @@
 # Intella DB for IntelliJ IDEA
 
 A free, open-source database client for **IntelliJ IDEA Community** (2026.2+): PostgreSQL,
-MySQL and MariaDB connections, a schema browser, a SQL console with a results grid, and an AI assistant that
-answers questions about your database in natural language (NL → SQL).
+MySQL, MariaDB and MongoDB connections, a schema browser, a SQL console (a MongoDB shell console for MongoDB)
+with a results grid, and an AI assistant that answers questions about your database in natural language
+(NL → SQL / mongosh).
 
 **Status:** working end-to-end, verified visually in the IDE sandbox — see [ROADMAP.md](ROADMAP.md).
 
@@ -16,10 +17,11 @@ IntelliJ Platform SDK — plus an AI layer that no stock edition offers in this 
 
 | Area | What you get |
 |------|--------------|
-| Connections | Add/edit/delete PostgreSQL, MySQL and MariaDB connections, per project or global (shared by all projects), Test Connection dialog, passwords in the IDE PasswordSafe (or session-only), SSL toggle, JDBC URL override |
+| Connections | Add/edit/delete PostgreSQL, MySQL, MariaDB and MongoDB connections, per project or global (shared by all projects), Test Connection dialog, passwords in the IDE PasswordSafe (or session-only), SSL toggle, JDBC URL override |
 | Schema browser | Connection → schema → table/view → column tree with types and primary-key markers, metadata refresh, Copy Table/Schema DDL |
 | SQL console | Multi-line editor with SQL highlighting, Ctrl/Cmd+Enter to run, multi-statement scripts (quote/dollar-quote/comment-aware splitter), results grid (first 1000 rows), update counts, timing, server version; edit cells (incl. Set NULL) and delete rows of single-table results with a key, then Submit them back as UPDATE / DELETE |
 | Table data | Double-click any table for a first-200-rows preview grid |
+| MongoDB | Databases → collections → sampled fields (with BSON types), indexes and views in the tree; a console for mongosh commands (`db.pets.find({…}).sort({…})`, `aggregate`, `countDocuments`, `distinct`, `insertOne/Many`, `updateOne/Many`, `replaceOne`, `deleteOne/Many`, `findOneAnd…`, indexes, `db.runCommand`, `use`, `show`) with highlighting and completion of collections, methods, fields, operators and pipeline stages; documents as grid rows (nested values as JSON), editable by `_id`; Tx: Manual transactions on replica sets; read-only connections refuse writes |
 | Liquibase support | SQL syntax highlighting injected into `<sql>` blocks of XML changelogs (root `<databaseChangeLog>` or a `liquibase` path segment); falls back to the plugin's own lightweight SQL highlighter when no SQL language is installed |
 | Column ↔ value aid | In long INSERTs: caret on a column highlights the matching value in every VALUES tuple (and vice versa), plus inline gray column-name hints before each value. Works in .sql files, Liquibase XML and the SQL console |
 | AI assistant (own tool window) | A conversation, not a form: type and hit **Enter** (Shift+Enter = newline); questions, answers, SQL blocks and **inline result tables** all live in one transcript; Run renders the query result right under the answer (or Insert into Console / Copy); live schema DDL in the prompt; per-connection history; a connection switcher at the top — browse saved connections from the DB Explorer tree or switch directly inside the chat; both tool windows work side by side |
@@ -62,14 +64,14 @@ how the wire format was verified.
 - IntelliJ IDEA 2026.2+ (build 262.*, Community or the free mode of the unified IDEA)
 - Java 25 toolchain (the 2026.2 platform itself is built with Java 25), Gradle 9.x,
   IntelliJ Platform Gradle Plugin 2.x
-- Bundled PostgreSQL JDBC driver 42.7.4 and MariaDB Connector/J 3.5.10 (LGPL-2.1, used for
-  MariaDB and MySQL) — no driver install needed
+- Bundled PostgreSQL JDBC driver 42.7.4, MariaDB Connector/J 3.5.10 (LGPL-2.1, used for
+  MariaDB and MySQL) and the MongoDB Java driver 5.13.0 (Apache-2.0) — no driver install needed
 
 ## Legal notes
 
 - Original implementation; no code or resources taken from IntelliJ IDEA Ultimate.
 - All IntelliJ Platform usage is via the documented SDK / public extension points.
-- "IntelliJ", "PostgreSQL", "MySQL" and "MariaDB" are trademarks of their respective owners. The
-  icons in `src/main/resources/icons/` are original designs drawn for this plugin, except the
-  database logos (`dbPostgres*`, `dbMysql*`, `dbMariadb*`), which are the products' official
-  marks, used to identify the database a connection points to.
+- "IntelliJ", "PostgreSQL", "MySQL", "MariaDB" and "MongoDB" are trademarks of their respective
+  owners. The icons in `src/main/resources/icons/` are original designs drawn for this plugin,
+  except the database logos (`dbPostgres*`, `dbMysql*`, `dbMariadb*`, `dbMongodb*`), which are
+  the products' official marks, used to identify the database a connection points to.

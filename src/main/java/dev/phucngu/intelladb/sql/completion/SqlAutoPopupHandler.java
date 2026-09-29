@@ -14,7 +14,8 @@ import java.util.Set;
 /**
  * Opens completion where the next word is predictable but no letter has been typed yet:
  * after a '.' ({@code alias.}, {@code schema.}), and after the space following JOIN or ON
- * (a related table with its condition, or the join condition itself).
+ * (a related table with its condition, or the join condition itself). In the MongoDB
+ * console: after '.' ({@code db.}, {@code db.pets.}) and '$' (operators).
  */
 public final class SqlAutoPopupHandler extends TypedHandlerDelegate {
 
@@ -23,6 +24,14 @@ public final class SqlAutoPopupHandler extends TypedHandlerDelegate {
     @Override
     public @NotNull Result checkAutoPopup(char charTyped, @NotNull Project project, @NotNull Editor editor,
                                           @NotNull PsiFile file) {
+        if (file.getLanguage() == dev.phucngu.intelladb.mongo.MongoShellLanguage.INSTANCE) {
+            // db. → collections, db.pets. → methods, { $ → operators
+            if (charTyped == '.' || charTyped == '$') {
+                AutoPopupController.getInstance(project).scheduleAutoPopup(editor);
+                return Result.STOP;
+            }
+            return Result.CONTINUE;
+        }
         if (file.getLanguage() != IntellaSqlLanguage.INSTANCE) {
             return Result.CONTINUE;
         }
