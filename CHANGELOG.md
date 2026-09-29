@@ -3,6 +3,27 @@
 ## Unreleased
 
 ### Added
+- **SQL completion in the console**, for PostgreSQL and MySQL alike. It knows the clause the
+  caret is in: statement keywords at the start; tables and schemas after FROM / JOIN /
+  UPDATE / INTO (current schema's tables as plain names, other schemas' qualified — typing
+  `ord` finds `sales.orders`); columns of the statement's tables (even when FROM comes after
+  the caret), their aliases, built-in functions and database functions in expressions;
+  `alias.`, `table.` and `schema.` qualifiers (the popup opens on `.`); the target table's
+  columns in `INSERT INTO t (…)`; data types in column definitions and `CAST(… AS …)`.
+  Keywords, functions and types come from the connection's dialect (e.g. `ILIKE`,
+  `string_agg`, `jsonb` vs `SHOW`, `group_concat`, `mediumtext`), keywords follow the case
+  being typed, identifiers are quoted as the dialect needs (`"Order Items"`, `` `order` ``),
+  and nothing is suggested inside strings, comments or after `AS`. Without a connection
+  (e.g. SQL injected into Liquibase changelogs) ANSI keywords are still offered.
+- **Join completion from foreign keys.** After `JOIN ` the popup opens by itself and lists
+  the tables related to the ones already in the statement, with the whole join ready to
+  insert (`customers c ON c.id = o.customer_id`), in either FK direction. After `ON ` it
+  opens with the condition itself (`oi.order_id = o.id`; composite keys joined with `AND`,
+  self-joins both ways). Joins rank above everything else.
+- **Automatic table aliases.** A table picked after FROM / JOIN is inserted with an alias
+  made of its initials (`orders o`, `order_items oi`, `OrderItems oi`), numbered when the
+  statement already uses it or it is a keyword (`u1`, `as1`); not added when an alias is
+  already written, nor after INTO / UPDATE.
 - **MySQL connections** (driver "MySQL"), through the bundled MariaDB Connector/J (LGPL).
   As in IntelliJ's database tools, MySQL databases appear as schemas directly under the
   connection (no database level); the "N of M" badge sits on the connection. Keys,

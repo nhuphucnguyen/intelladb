@@ -1,3 +1,5 @@
+import org.jetbrains.intellij.platform.gradle.TestFrameworkType
+
 plugins {
     id("java")
     id("org.jetbrains.intellij.platform") version "2.18.1"
@@ -29,11 +31,15 @@ dependencies {
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    // IDE-level tests (BasePlatformTestCase) are JUnit 3/4 style; the vintage engine runs them on the JUnit Platform.
+    testImplementation("junit:junit:4.13.2")
+    testRuntimeOnly("org.junit.vintage:junit-vintage-engine:5.10.2")
     intellijPlatform {
         // Since 2025.3 IDEA is a single unified distribution (free without Ultimate license);
         // intellijIdeaCommunity artifacts are discontinued.
         intellijIdea("2026.2")
         pluginVerifier()
+        testFramework(TestFrameworkType.Platform)
     }
 }
 

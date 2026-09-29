@@ -93,6 +93,8 @@ the PostgreSQL/ANSI behaviour, so a new dialect only overrides what differs:
 - **SQL syntax:** `quote`, `limit`, `useNamespaceStatement`, `defaultSchema`,
   `isSystemSchema`, and `splitterOptions()` (`SqlSplitter.Options`: dollar quotes,
   backticks, `#` comments, backslash escapes).
+- **Vocabulary:** `vocabulary()` returns the `SqlVocabulary` completion offers — keywords,
+  statement starters, functions, data types — as `SqlVocabulary.ANSI.plus(…)`.
 - **Driver-specific values:** `displayValue` (PGobject) and `sourceTable` (which single
   table a result set came from, when the driver reports it).
 
@@ -101,6 +103,36 @@ Only files named `Postgres*.java` / `MySql*.java` may reference `org.postgresql`
 (BSD-2-Clause) and MariaDB Connector/J (LGPL-2.1, chosen for MySQL because MySQL's own
 Connector/J is GPL).
 
+## SQL completion
+
+`sql/completion/` is layered so the logic is plain Java and the IDE only sees an adapter:
+
+```
+SqlCompletionContributor  (IDE: CompletionContributor → LookupElements; SqlAutoPopupHandler opens it on '.')
+   │  text + caret                          │  CompletionScope (from the file's SCOPE user data)
+   ▼                                        ▼
+CursorAnalyzer ──► CursorContext ──► SuggestionEngine ──► List<Suggestion>
+   │ SqlTokenizer                          catalog · current schema · SqlVocabulary · quoting
+```
+
+- `CursorAnalyzer` works on text, not PSI: it tokenizes with the dialect's lexical rules
+  (`SqlTokenizer`, same options as `SqlSplitter`), isolates the statement around the caret,
+  and scans back for the clause keyword (skipping parenthesised parts) to produce a
+  `CursorContext` — the clause (statement start, table, expression, keyword, INSERT column
+  list, type), the `a.b.` qualifier, the typed prefix and every table reference (with
+  alias) in the statement.
+- `SuggestionEngine` resolves those references against the `SchemaCatalog` (qualified →
+  that schema; else the current schema first, then any) and ranks `Suggestion`s; prefix
+  filtering is left to the IDE's matcher. Joins come from `TableMeta.foreignKeys` in both
+  directions: after `JOIN` (the analyzer reports the clause keyword) a related table with its
+  `ON`, after `JOIN t ON` (the analyzer reports the joined table) the condition itself.
+  `TableAliases` makes initials-based aliases that avoid the statement's names and keywords.
+- The contributor adds a weigher ahead of the platform's prefix weigher so joins sort first;
+  `SqlAutoPopupHandler` opens the popup after `.` and after the space following JOIN / ON.
+- `CompletionScope` is what a file completes against. `SqlConsole` publishes one per
+  completion (its connection's dialect, catalog and effective schema); anything else
+  gets `CompletionScope.offline()` (ANSI words only).
+
 ## Testing
 
 `MetadataLoaderPostgresTest` and `MetadataLoaderMySqlTest` run against real local servers
@@ -108,4 +140,8 @@ Connector/J is GPL).
 Pure-JVM JUnit tests cover `SqlSplitter`, `DdlGenerator`/`IdentifierQuoting`, the dialects, prompt building
 and SQL-block extraction, and the full `OpenAiCompatibleClient` wire format against a
 JDK-built-in `HttpServer` (URL path, Bearer header, JSON body, HTTP-error/parse-error paths).
+`CursorAnalyzerTest` and `SuggestionEngineTest` cover completion logic in plain JUnit;
+`SqlCompletionIdeTest` (a `BasePlatformTestCase`, run through the JUnit vintage engine)
+drives the registered contributor in a headless IDE — lookup contents, prefix matching and
+insertion (qualified tables, quoting, parentheses for functions, keyword case).
 UI behavior is verified by driving `runIde` with computer use (see ROADMAP M8).

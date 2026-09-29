@@ -2,6 +2,7 @@ package dev.phucngu.intelladb.connection;
 
 import dev.phucngu.intelladb.schema.MySqlObjects;
 import dev.phucngu.intelladb.schema.ObjectsLoader;
+import dev.phucngu.intelladb.sql.SqlVocabulary;
 import dev.phucngu.intelladb.util.SqlSplitter;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -36,6 +37,21 @@ public final class MySqlDialect implements DbDialect {
             "into", "is", "join", "key", "keys", "left", "like", "limit", "not", "null", "on", "or", "order",
             "outer", "primary", "range", "references", "rename", "right", "select", "set", "show", "table",
             "then", "to", "union", "unique", "update", "use", "using", "values", "when", "where", "with");
+
+    private static final SqlVocabulary VOCABULARY = SqlVocabulary.ANSI.plus(
+            SqlVocabulary.words("auto_increment", "charset", "collate", "div", "duplicate", "engine", "high_priority",
+                    "ignore", "interval", "low_priority", "regexp", "rlike", "straight_join", "unsigned", "xor",
+                    "zerofill"),
+            SqlVocabulary.words("analyze", "call", "describe", "do", "handler", "load", "lock", "optimize", "rename",
+                    "repair", "replace", "set", "show", "start", "unlock", "use"),
+            SqlVocabulary.words("concat", "concat_ws", "curdate", "curtime", "database", "date_add", "date_format",
+                    "date_sub", "datediff", "dense_rank", "found_rows", "from_unixtime", "greatest", "group_concat",
+                    "if", "ifnull", "instr", "json_array", "json_contains", "json_extract", "json_object",
+                    "json_unquote", "lag", "last_insert_id", "lead", "least", "left", "locate", "lpad", "md5", "now",
+                    "rank", "replace", "right", "row_count", "row_number", "rpad", "sha2", "str_to_date",
+                    "substring_index", "sysdate", "timestampdiff", "unix_timestamp", "user", "uuid", "version"),
+            SqlVocabulary.words("binary", "bit", "blob", "datetime", "double", "enum", "json", "longblob", "longtext",
+                    "mediumint", "mediumtext", "text", "tinyint", "tinytext", "varbinary", "year"));
 
     private final MySqlObjects objects = new MySqlObjects();
     private volatile org.mariadb.jdbc.Driver driver;
@@ -163,6 +179,11 @@ public final class MySqlDialect implements DbDialect {
     @Override
     public @Nullable String useNamespaceStatement(@NotNull String namespace) {
         return "USE " + quote(namespace);
+    }
+
+    @Override
+    public @NotNull SqlVocabulary vocabulary() {
+        return VOCABULARY;
     }
 
     @Override

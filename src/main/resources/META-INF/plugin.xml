@@ -47,6 +47,10 @@
         <lang.parserDefinition language="IntellaSQL"
                                implementationClass="dev.phucngu.intelladb.sql.IntellaSqlParserDefinition"/>
 
+        <!-- Completion: schema objects of the console's connection plus the dialect's keywords/functions -->
+        <completion.contributor language="IntellaSQL"
+                                implementationClass="dev.phucngu.intelladb.sql.completion.SqlCompletionContributor"/>
+        <typedHandler implementation="dev.phucngu.intelladb.sql.completion.SqlAutoPopupHandler"/>
         <!-- INSERT column <-> value aid (caret highlighting + inline column hints) -->
         <postStartupActivity implementation="dev.phucngu.intelladb.sql.SqlColumnValueAidStartup"/>
 

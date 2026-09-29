@@ -2,6 +2,7 @@ package dev.phucngu.intelladb.connection;
 
 import dev.phucngu.intelladb.schema.ObjectsLoader;
 import dev.phucngu.intelladb.schema.PostgresObjects;
+import dev.phucngu.intelladb.sql.SqlVocabulary;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -21,6 +22,22 @@ public final class PostgresDialect implements DbDialect {
 
     private static final List<String> SSL_MODES =
             List.of("require", "verify-ca", "verify-full", "prefer", "allow", "disable");
+
+    private static final SqlVocabulary VOCABULARY = SqlVocabulary.ANSI.plus(
+            SqlVocabulary.words("concurrently", "conflict", "do", "filter", "ilike", "lateral", "materialized",
+                    "nothing", "nulls", "returning", "similar", "tablesample", "within"),
+            SqlVocabulary.words("analyze", "call", "cluster", "comment", "copy", "deallocate", "discard", "do",
+                    "execute", "listen", "lock", "notify", "prepare", "refresh", "reindex", "reset", "set",
+                    "show", "vacuum"),
+            SqlVocabulary.words("age", "array_agg", "array_length", "concat", "concat_ws", "date_part", "date_trunc",
+                    "dense_rank", "extract", "first_value", "gen_random_uuid", "generate_series", "greatest",
+                    "json_agg", "json_build_object", "jsonb_agg", "jsonb_array_elements", "jsonb_build_object",
+                    "jsonb_each", "jsonb_set", "lag", "last_value", "lead", "least", "left", "lpad", "now",
+                    "position", "rank", "regexp_matches", "regexp_replace", "replace", "right", "row_number",
+                    "rpad", "split_part", "string_agg", "to_char", "to_date", "to_timestamp", "unnest"),
+            SqlVocabulary.words("bigserial", "bytea", "cidr", "double precision", "float4", "float8", "inet", "int2",
+                    "int4", "int8", "interval", "json", "jsonb", "money", "serial", "smallserial", "text",
+                    "timestamptz", "timetz", "tsvector", "uuid", "xml"));
 
     private final PostgresObjects objects = new PostgresObjects();
     private volatile org.postgresql.Driver driver;
@@ -122,6 +139,11 @@ public final class PostgresDialect implements DbDialect {
     @Override
     public @Nullable String useNamespaceStatement(@NotNull String namespace) {
         return "SET search_path TO " + quote(namespace);
+    }
+
+    @Override
+    public @NotNull SqlVocabulary vocabulary() {
+        return VOCABULARY;
     }
 
     @Override

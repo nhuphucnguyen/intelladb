@@ -36,6 +36,8 @@ import dev.phucngu.intelladb.history.QueryHistory;
 import dev.phucngu.intelladb.schema.SchemaCatalog;
 import dev.phucngu.intelladb.sql.IntellaSqlFileType;
 import dev.phucngu.intelladb.sql.SqlColumnValueAid;
+import dev.phucngu.intelladb.sql.completion.CompletionScope;
+import dev.phucngu.intelladb.sql.completion.SqlCompletionContributor;
 import dev.phucngu.intelladb.util.SqlSplitter;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -106,6 +108,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         this.file = new LightVirtualFile("console.sql", IntellaSqlFileType.INSTANCE,
                 "-- SQL for " + config.describe() + "\n");
         file.putUserData(KEY, this);
+        file.putUserData(SqlCompletionContributor.SCOPE, this::completionScope);
         this.document = FileDocumentManager.getInstance().getDocument(file);
         document.putUserData(SqlColumnValueAid.CONSOLE_DOCUMENT, true);
         this.markers = new ExecutionMarkers(project, document);
@@ -418,6 +421,29 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         ApplicationManager.getApplication().invokeLater(runnable);
     }
 
+    /**
+     * The schema unqualified names resolve to: the one picked in the switcher, else the
+     * dialect's default (PostgreSQL's public) or, where databases are schemas, the database
+     * from the connection settings — when the catalog has it. Null when there is none.
+     */
+    private @Nullable String effectiveSchema() {
+        if (schema != null) {
+            return schema;
+        }
+        DbDialect dialect = config.dialect();
+        String fallback = dialect.defaultSchema();
+        if (fallback == null && dialect.namespaces() == NamespaceModel.SCHEMAS_ONLY) {
+            fallback = config.database;
+        }
+        return fallback != null && schemaNames().contains(fallback) ? fallback : null;
+    }
+
+    /** What completion in this console suggests from (called on a background thread). */
+    private @NotNull CompletionScope completionScope() {
+        DbSession session = explorer.sessionOf(config);
+        return CompletionScope.of(config.dialect(), session == null ? null : session.catalog(), effectiveSchema());
+    }
+
     private @NotNull List<String> schemaNames() {
         DbSession session = explorer.sessionOf(config);
         SchemaCatalog catalog = session == null ? null : session.catalog();
@@ -621,12 +647,8 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         @Override
         public void update(@NotNull AnActionEvent e) {
             DbDialect dialect = config.dialect();
-            String fallback = dialect.defaultSchema();
-            if (fallback == null && dialect.namespaces() == NamespaceModel.SCHEMAS_ONLY) {
-                fallback = config.database; // the database from the connection settings is the default
-            }
-            String shown = schema != null ? schema
-                    : (fallback != null && schemaNames().contains(fallback) ? fallback : "<schema>");
+            String effective = effectiveSchema();
+            String shown = effective != null ? effective : "<schema>";
             // With catalogs as schemas there is no database level to prefix.
             e.getPresentation().setText(dialect.namespaces() == NamespaceModel.SCHEMAS_ONLY ? shown
                     : (config.database.isBlank() ? config.name : config.database) + "." + shown);

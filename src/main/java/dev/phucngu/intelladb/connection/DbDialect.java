@@ -2,6 +2,7 @@ package dev.phucngu.intelladb.connection;
 
 import dev.phucngu.intelladb.schema.IdentifierQuoting;
 import dev.phucngu.intelladb.schema.ObjectsLoader;
+import dev.phucngu.intelladb.sql.SqlVocabulary;
 import dev.phucngu.intelladb.util.SqlSplitter;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -123,6 +124,11 @@ public interface DbDialect {
     /** Schema a server resolves unqualified names to when nothing was selected; null if there is none. */
     default @Nullable String defaultSchema() {
         return null;
+    }
+
+    /** Keywords, functions and types offered by completion in this dialect's consoles. */
+    default @NotNull SqlVocabulary vocabulary() {
+        return SqlVocabulary.ANSI;
     }
 
     /** Lexical rules for splitting scripts into statements. */

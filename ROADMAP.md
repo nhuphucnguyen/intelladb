@@ -23,6 +23,8 @@ Built milestone by milestone, same discipline as the sibling
 | M9e | AI Assistant split into its own tool window with a connection switcher; shared SessionOpener for Explorer + chat | ✅ |
 | M52 | Dialect seams: every PostgreSQL assumption moved behind `DbDialect` (namespace model, quoting, LIMIT, schema switching, system schemas, splitter options, `Driver.connect`, value/metadata handling, SSL modes, AI prompt dialect); PostgreSQL behaviour unchanged | ✅ |
 | M53 | MySQL dialect on the bundled MariaDB Connector/J: databases shown as schemas under the connection (like IntelliJ), `MySqlObjects` from information_schema, backtick/`#`/backslash-aware splitter and lexer, integration test against a real server | ✅ |
+| M54 | SQL completion for both dialects: `CursorAnalyzer` (clause, qualifier, table refs from text) → `SuggestionEngine` (catalog + `SqlVocabulary` per dialect) → IDE contributor; popup on `.`; unit + headless-IDE tests | ✅ |
+| M55 | FK-driven join completion (`JOIN ` → related table + ON, `ON ` → condition; popup opens on the space) and automatic initials-based table aliases after FROM / JOIN | ✅ |
 
 ## Verification record (M8)
 
