@@ -74,6 +74,19 @@ public final class JsonText {
         }
     }
 
+    /** JSON on one line without extra whitespace (properties in their order); non-JSON comes back unchanged. */
+    public static @NotNull String compactIfJson(@NotNull String text) {
+        if (!isJson(text)) {
+            return text;
+        }
+        try {
+            return new GsonBuilder().disableHtmlEscaping().serializeNulls().create()
+                    .toJson(JsonParser.parseString(text.trim()));
+        } catch (Exception e) {
+            return text;
+        }
+    }
+
     private static final Comparator<String> NAME_ORDER =
             String.CASE_INSENSITIVE_ORDER.thenComparing(Comparator.naturalOrder());
 

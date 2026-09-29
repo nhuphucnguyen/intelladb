@@ -17,6 +17,9 @@ public final class IntellaDbIcons {
     public static final Icon FOREIGN_KEY = IconLoader.getIcon("/icons/dbForeignKey.svg", IntellaDbIcons.class);
     public static final Icon SEQUENCE = IconLoader.getIcon("/icons/dbSequence.svg", IntellaDbIcons.class);
     public static final Icon INDEX = IconLoader.getIcon("/icons/dbIndex.svg", IntellaDbIcons.class);
+    public static final Icon SUBMIT = IconLoader.getIcon("/icons/dbSubmit.svg", IntellaDbIcons.class);
+    /** Submit with changes waiting: the same arrow outlined in green. */
+    public static final Icon SUBMIT_PENDING = IconLoader.getIcon("/icons/dbSubmitPending.svg", IntellaDbIcons.class);
     public static final Icon AI = IconLoader.getIcon("/icons/dbAi.svg", IntellaDbIcons.class);
 
     private IntellaDbIcons() {

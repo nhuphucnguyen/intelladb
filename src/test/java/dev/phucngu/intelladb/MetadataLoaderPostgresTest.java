@@ -3,6 +3,7 @@ package dev.phucngu.intelladb;
 import dev.phucngu.intelladb.connection.DbConfig;
 import dev.phucngu.intelladb.connection.DbSession;
 import dev.phucngu.intelladb.connection.PostgresDialect;
+import dev.phucngu.intelladb.connection.SqlResult;
 import dev.phucngu.intelladb.schema.MetadataLoader;
 import dev.phucngu.intelladb.schema.SchemaCatalog;
 import dev.phucngu.intelladb.schema.TableMeta;
@@ -17,6 +18,7 @@ import java.sql.Statement;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -140,6 +142,64 @@ class MetadataLoaderPostgresTest {
                     () -> st.execute("CREATE TABLE " + SCHEMA + ".nope (id INT)"));
             assertTrue(denied.getMessage().contains("read-only"), denied.getMessage());
         }
+    }
+
+    @Test
+    void editedRowsAreWrittenBackAllOrNothing() throws SQLException {
+        DbConfig config = new DbConfig();
+        config.jdbcUrlOverride = env("INTELLADB_TEST_URL", "jdbc:postgresql://localhost:5432/intelladb");
+        config.user = env("INTELLADB_TEST_USER", "intella");
+        String owner = SCHEMA + ".owner";
+        try (DbSession session = new DbSession(config, env("INTELLADB_TEST_PASSWORD", "intella123"))) {
+            session.execute("INSERT INTO " + owner + " (id, code) VALUES (101, 'a'), (102, 'b')");
+            // Aliases don't hide the base columns an edit writes to.
+            SqlResult rows = session.execute("SELECT id AS ident, code, length(code) FROM " + owner);
+            assertEquals(List.of(), rows.sourceColumns); // computed column: not one table
+            rows = session.execute("SELECT id AS ident, code FROM " + owner);
+            assertEquals(java.util.Arrays.asList("id", "code"), rows.sourceColumns);
+
+            SqlResult ok = session.applyRowUpdates(List.of(
+                    "UPDATE " + owner + " SET code = 'aa' WHERE id = 101"));
+            assertTrue(ok.isSuccessful(), ok.text);
+            assertEquals("1 row changed", ok.text);
+
+            // The second row is gone: nothing sticks, and auto-commit is back on.
+            SqlResult failed = session.applyRowUpdates(List.of(
+                    "UPDATE " + owner + " SET code = 'x' WHERE id = 102",
+                    "UPDATE " + owner + " SET code = 'y' WHERE id = 999"));
+            assertFalse(failed.isSuccessful());
+            assertTrue(failed.text.startsWith("No row matched"), failed.text);
+            assertEquals("aa,b", codes(session, owner));
+
+            // In a manual transaction a failed submit only undoes itself (savepoint) …
+            session.setAutoCommit(false);
+            session.execute("UPDATE " + owner + " SET code = 'bb' WHERE id = 102");
+            assertFalse(session.applyRowUpdates(List.of(
+                    "UPDATE " + owner + " SET code = 'z' WHERE id = 101",
+                    "UPDATE " + owner + " SET code = 'z' WHERE id = 999")).isSuccessful());
+            assertEquals("aa,bb", codes(session, owner));
+            // … and a successful one stays pending until the user commits or rolls back.
+            SqlResult pending = session.applyRowUpdates(List.of(
+                    "UPDATE " + owner + " SET code = 'c' WHERE id = 101"));
+            assertTrue(pending.text.contains("pending"), pending.text);
+            session.rollback();
+            session.setAutoCommit(true);
+            assertEquals("aa,b", codes(session, owner));
+
+            // Updates and deletes go together; a delete that matches nothing undoes the update too.
+            assertFalse(session.applyRowUpdates(List.of(
+                    "UPDATE " + owner + " SET code = 'q' WHERE id = 101",
+                    "DELETE FROM " + owner + " WHERE id = 999")).isSuccessful());
+            assertEquals("aa,b", codes(session, owner));
+            SqlResult deleted = session.applyRowUpdates(List.of("DELETE FROM " + owner + " WHERE id = 102"));
+            assertTrue(deleted.isSuccessful(), deleted.text);
+            assertEquals("aa", codes(session, owner));
+        }
+    }
+
+    private static String codes(DbSession session, String owner) {
+        SqlResult result = session.execute("SELECT code FROM " + owner + " WHERE id > 100 ORDER BY id");
+        return result.rows.stream().map(row -> String.valueOf(row[0])).collect(java.util.stream.Collectors.joining(","));
     }
 
     @Test

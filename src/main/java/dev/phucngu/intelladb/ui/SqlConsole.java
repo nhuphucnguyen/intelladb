@@ -300,6 +300,13 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
     }
 
     @Override
+    public void rowsUpdated(@NotNull List<String> statements, @NotNull SqlResult outcome) {
+        ConsoleResultsView view = ResultsHub.getInstance(project).viewFor(this);
+        statements.forEach(sql -> view.logStatement(config.name, sql));
+        view.logResult(outcome);
+    }
+
+    @Override
     public void cancel() {
         if (!running) {
             return;

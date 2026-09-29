@@ -39,7 +39,11 @@ import java.util.Set;
  * italics, right-aligned numbers, the editor font, click-to-sort headers and cell
  * selection (Ctrl/Cmd+C copies the selected cells as TSV). Clicking row numbers selects
  * whole rows (Shift+click for a range, Cmd/Ctrl+click to toggle). Double-click opens the
- * full value.
+ * full value — or, when the result can be written back ({@link #setWritableColumns}),
+ * edits the cell in place (Shift+Enter, the JSON badge and multi-line cells open the value
+ * in an editable dialog instead); cells can be set to NULL
+ * and rows marked deleted (struck through). Edits stay pending, highlighted, until they
+ * are accepted (submitted) or reverted.
  */
 final class ResultGrid extends JBTable {
 
@@ -76,6 +80,7 @@ final class ResultGrid extends JBTable {
         getTableHeader().setReorderingAllowed(true);
         getEmptyText().setText("No rows");
         setDefaultRenderer(Object.class, new CellRenderer());
+        setDefaultEditor(Object.class, new CellEditor());
         applyEditorFont();
         getSelectionModel().addListSelectionListener(e -> rowHeader.repaint());
         MouseAdapter mouse = new MouseAdapter() {
@@ -83,7 +88,8 @@ final class ResultGrid extends JBTable {
             public void mouseClicked(@NotNull MouseEvent e) {
                 int row = rowAtPoint(e.getPoint());
                 int column = columnAtPoint(e.getPoint());
-                if (e.getClickCount() == 2 || (e.getClickCount() == 1 && onJsonIcon(e.getPoint()))) {
+                boolean edits = row >= 0 && column >= 0 && isCellEditable(row, column);
+                if ((e.getClickCount() == 2 && !edits) || (e.getClickCount() == 1 && onJsonIcon(e.getPoint()))) {
                     viewCell(row, column);
                 }
             }
@@ -102,6 +108,14 @@ final class ResultGrid extends JBTable {
         };
         addMouseListener(mouse);
         addMouseMotionListener(mouse);
+        getInputMap(WHEN_FOCUSED).put(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ENTER,
+                java.awt.event.InputEvent.SHIFT_DOWN_MASK), "intelladb.viewCell");
+        getActionMap().put("intelladb.viewCell", new javax.swing.AbstractAction() {
+            @Override
+            public void actionPerformed(@NotNull java.awt.event.ActionEvent e) {
+                viewCell(getSelectedRow(), getSelectedColumn());
+            }
+        });
     }
 
     /** Wraps the grid in a scroll pane whose row header is the frozen row-number gutter. */
@@ -118,6 +132,7 @@ final class ResultGrid extends JBTable {
                 : new GridModel(result.columns, result.columnTypes, result.rows);
         jsonCells.clear();
         setModel(model);
+        model.addTableModelListener(e -> jsonCells.clear()); // an edit can make a cell (non-)JSON
         TableRowSorter<GridModel> sorter = new TableRowSorter<>(model);
         for (int c = 0; c < model.getColumnCount(); c++) {
             sorter.setComparator(c, ResultGrid::compareValues);
@@ -127,6 +142,136 @@ final class ResultGrid extends JBTable {
         installHeaderRenderer();
         fitColumns();
         rowHeader.refresh();
+    }
+
+    // ------------------------------------------------------------------ editing
+
+    /**
+     * Makes the columns flagged in {@code writable} (by model index) editable, or none for
+     * null; {@code onChange} runs whenever the set of pending edits changes.
+     */
+    void setWritableColumns(boolean @Nullable [] writable, @NotNull Runnable onChange) {
+        model.writable = writable;
+        model.onChange = onChange;
+    }
+
+    /** While locked (edits being submitted) no cell can be edited. */
+    void setEditsLocked(boolean locked) {
+        model.locked = locked;
+    }
+
+    boolean hasEdits() {
+        return !model.edits.isEmpty() || !model.deleted.isEmpty();
+    }
+
+    int deletedRowCount() {
+        return model.deleted.size();
+    }
+
+    /** Rows marked for deletion (model indices, ascending). */
+    @NotNull java.util.SortedSet<Integer> deletedRows() {
+        return new java.util.TreeSet<>(model.deleted);
+    }
+
+    /** Whether the result is editable at all (rows can then be deleted and cells set to NULL). */
+    boolean isWritable() {
+        return model.writable != null && !model.locked;
+    }
+
+    /** Sets every editable selected cell to NULL. */
+    void setSelectedCellsNull() {
+        if (!finishCellEditing()) {
+            return;
+        }
+        for (int row : getSelectedRows()) {
+            for (int column : getSelectedColumns()) {
+                if (isCellSelected(row, column)
+                        && model.isWritable(convertRowIndexToModel(row), convertColumnIndexToModel(column))) {
+                    setValueAt(null, row, column);
+                }
+            }
+        }
+    }
+
+    /** Marks the rows touched by the selection deleted; their pending edits are dropped. */
+    void deleteSelectedRows() {
+        if (!isWritable() || !finishCellEditing()) {
+            return;
+        }
+        for (int view : getSelectedRows()) {
+            int row = convertRowIndexToModel(view);
+            model.deleted.add(row);
+            model.edits.remove(row);
+        }
+        repaint();
+        rowHeader.repaint();
+        model.onChange.run();
+    }
+
+    int editedCellCount() {
+        return model.edits.values().stream().mapToInt(java.util.Map::size).sum();
+    }
+
+    /** Pending edits: model row → (model column → new value), rows in model order. */
+    @NotNull java.util.SortedMap<Integer, java.util.Map<Integer, Object>> edits() {
+        java.util.TreeMap<Integer, java.util.Map<Integer, Object>> copy = new java.util.TreeMap<>();
+        model.edits.forEach((row, cells) -> copy.put(row, new java.util.TreeMap<>(cells)));
+        return copy;
+    }
+
+    /** Row {@code modelRow} as loaded, without its pending edits. */
+    @NotNull Object[] loadedRow(int modelRow) {
+        return model.rows.get(modelRow);
+    }
+
+    /** Commits the in-progress cell edit, if any; false when the editor rejected its value. */
+    boolean finishCellEditing() {
+        return !isEditing() || getCellEditor().stopCellEditing();
+    }
+
+    /** The edits were written to the database: they become the loaded values, deleted rows go. */
+    void acceptEdits() {
+        model.edits.forEach((row, cells) -> cells.forEach((column, value) -> model.rows.get(row)[column] = value));
+        boolean removed = !model.deleted.isEmpty();
+        new java.util.TreeSet<>(model.deleted).descendingSet().forEach(row -> model.rows.remove((int) row));
+        model.deleted.clear();
+        if (removed) {
+            clearSelection();
+            model.fireTableDataChanged();
+            rowHeader.refresh();
+        }
+        clearEdits();
+    }
+
+    void revertEdits() {
+        if (isEditing()) {
+            getCellEditor().cancelCellEditing();
+        }
+        clearEdits();
+    }
+
+    private void clearEdits() {
+        model.edits.clear();
+        model.deleted.clear();
+        jsonCells.clear();
+        repaint();
+        rowHeader.repaint();
+        model.onChange.run();
+    }
+
+    private final class CellEditor extends javax.swing.DefaultCellEditor {
+        CellEditor() {
+            super(new com.intellij.ui.components.JBTextField());
+            setClickCountToStart(2);
+        }
+
+        @Override
+        public Component getTableCellEditorComponent(JTable table, Object value, boolean selected, int row, int column) {
+            Component component = super.getTableCellEditorComponent(table, value == null ? "" : String.valueOf(value),
+                    selected, row, column);
+            component.setFont(table.getFont());
+            return component;
+        }
     }
 
     // ------------------------------------------------------------------ row access
@@ -191,6 +336,8 @@ final class ResultGrid extends JBTable {
     private static final String JSON_BADGE = "JSON";
     private static final JBColor BADGE_BACKGROUND = new JBColor(new Color(0xDFE8F8), new Color(0x2E3F5E));
     private static final JBColor BADGE_HOVER_BACKGROUND = new JBColor(new Color(0xC2D4F2), new Color(0x3C5480));
+    private static final JBColor EDITED_BACKGROUND = new JBColor(new Color(0xD5E8FF), new Color(0x2B4058));
+    private static final JBColor DELETED_BACKGROUND = new JBColor(new Color(0xFBDADA), new Color(0x4A2E2E));
     private static final JBColor BADGE_FOREGROUND = new JBColor(new Color(0x2A5DB0), new Color(0xA9C6F5));
 
     private static @NotNull Font badgeFont(@NotNull Font cellFont) {
@@ -292,10 +439,21 @@ final class ResultGrid extends JBTable {
             setTextAlign(numeric ? SwingConstants.RIGHT : SwingConstants.LEFT);
             jsonBadge = value != null && jsonKind(row, column) != JsonKind.NONE;
             badgeHovered = row == hoveredRow && column == hoveredColumn;
+            int modelRow = table.convertRowIndexToModel(row);
+            boolean deleted = model.deleted.contains(modelRow);
+            if (!selected && deleted) {
+                setBackground(DELETED_BACKGROUND);
+            } else if (!selected && model.isEdited(modelRow, table.convertColumnIndexToModel(column))) {
+                setBackground(EDITED_BACKGROUND);
+            }
+            int strike = deleted ? SimpleTextAttributes.STYLE_STRIKEOUT : 0;
             if (value == null) {
-                append("<null>", SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES);
+                append("<null>", new SimpleTextAttributes(SimpleTextAttributes.STYLE_ITALIC | strike,
+                        SimpleTextAttributes.GRAYED_ATTRIBUTES.getFgColor()));
             } else {
-                append(display(value), SimpleTextAttributes.REGULAR_ATTRIBUTES);
+                append(display(value), deleted
+                        ? new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN | strike, null)
+                        : SimpleTextAttributes.REGULAR_ATTRIBUTES);
             }
         }
 
@@ -380,8 +538,24 @@ final class ResultGrid extends JBTable {
             return;
         }
         Object value = getValueAt(viewRow, viewColumn);
-        if (value != null) { // NULL has nothing more to show
+        boolean writable = model.isWritable(convertRowIndexToModel(viewRow), convertColumnIndexToModel(viewColumn));
+        if (value == null && !writable) { // a read-only NULL has nothing more to show
+            return;
+        }
+        if (!writable) {
             new CellValueDialog(project, getColumnName(viewColumn), String.valueOf(value)).show();
+            return;
+        }
+        if (!finishCellEditing()) {
+            return;
+        }
+        CellValueDialog dialog = new CellValueDialog(project, getColumnName(viewColumn),
+                value == null ? "" : String.valueOf(value), true);
+        if (dialog.showAndGet()) {
+            String edited = dialog.editedValue();
+            if (edited != null) { // Apply: a pending edit, saved by Submit like any other
+                setValueAt(edited, viewRow, viewColumn);
+            }
         }
     }
 
@@ -410,6 +584,15 @@ final class ResultGrid extends JBTable {
         private final List<String> columns;
         private final List<String> types;
         private final List<Object[]> rows;
+        /** Editable columns by model index; null when the result is read-only. */
+        private boolean @Nullable [] writable;
+        private boolean locked;
+        /** Pending edits: model row → (model column → new value). */
+        private final java.util.Map<Integer, java.util.Map<Integer, Object>> edits = new java.util.HashMap<>();
+        /** Rows marked for deletion (model indices). */
+        private final java.util.Set<Integer> deleted = new java.util.HashSet<>();
+        private Runnable onChange = () -> {
+        };
 
         GridModel(@NotNull List<String> columns, @NotNull List<String> types, @NotNull List<Object[]> rows) {
             this.columns = columns;
@@ -438,8 +621,61 @@ final class ResultGrid extends JBTable {
 
         @Override
         public Object getValueAt(int row, int column) {
+            java.util.Map<Integer, Object> edited = edits.get(row);
+            if (edited != null && edited.containsKey(column)) {
+                return edited.get(column);
+            }
+            return loadedValue(row, column);
+        }
+
+        private @Nullable Object loadedValue(int row, int column) {
             Object[] values = rows.get(row);
             return column < values.length ? values[column] : null;
+        }
+
+        boolean isEdited(int row, int column) {
+            java.util.Map<Integer, Object> edited = edits.get(row);
+            return edited != null && edited.containsKey(column);
+        }
+
+        /**
+         * Writable column, not locked, and the value fits a one-line editor: the text field
+         * would flatten line breaks, so multi-line values stay read-only here.
+         */
+        @Override
+        public boolean isCellEditable(int row, int column) {
+            if (!isWritable(row, column)) {
+                return false;
+            }
+            Object value = getValueAt(row, column);
+            return !(value instanceof String text && (text.indexOf('\n') >= 0 || text.indexOf('\r') >= 0));
+        }
+
+        /** The cell can take a new value (SET NULL included), multi-line or not. */
+        boolean isWritable(int row, int column) {
+            return writable != null && !locked && column < writable.length && writable[column] && !deleted.contains(row);
+        }
+
+        /** Records an edit (null = SET NULL); typing back the loaded value (or nothing into a NULL) drops it. */
+        @Override
+        public void setValueAt(Object value, int row, int column) {
+            Object loaded = loadedValue(row, column);
+            boolean unchanged = loaded == null
+                    ? value == null || String.valueOf(value).isEmpty()
+                    : value != null && String.valueOf(loaded).equals(String.valueOf(value));
+            if (unchanged) {
+                java.util.Map<Integer, Object> edited = edits.get(row);
+                if (edited != null) {
+                    edited.remove(column);
+                    if (edited.isEmpty()) {
+                        edits.remove(row);
+                    }
+                }
+            } else {
+                edits.computeIfAbsent(row, r -> new java.util.HashMap<>()).put(column, value);
+            }
+            fireTableCellUpdated(row, column);
+            onChange.run();
         }
     }
 

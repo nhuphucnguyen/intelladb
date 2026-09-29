@@ -95,8 +95,21 @@ the PostgreSQL/ANSI behaviour, so a new dialect only overrides what differs:
   backticks, `#` comments, backslash escapes).
 - **Vocabulary:** `vocabulary()` returns the `SqlVocabulary` completion offers — keywords,
   statement starters, functions, data types — as `SqlVocabulary.ANSI.plus(…)`.
-- **Driver-specific values:** `displayValue` (PGobject) and `sourceTable` (which single
-  table a result set came from, when the driver reports it).
+- **Driver-specific values:** `displayValue` (PGobject), `sourceTable` (which single
+  table a result set came from, when the driver reports it) and `baseColumnName` (the
+  table column behind an aliased result column — pgjdbc needs its own metadata call).
+
+## Editing results
+
+`SqlResult.sourceColumns` names the base column of each result column when the rows come
+from one table (null for binary columns). `ResultsPanel` makes the grid editable when that
+table is in the catalog and `RowUpdates.rowKey` finds a key (PK, else a unique key over NOT
+NULL columns) whose columns are all in the result. `ResultGrid` keeps edits (null = SET NULL)
+and rows marked deleted as pending state beside the loaded rows; Submit turns each edited
+row into `UPDATE … SET … WHERE key = <loaded value>` and each deleted one into `DELETE …
+WHERE key = …` (`RowUpdates`, string literals the server converts to the column type) and runs them with `DbSession.applyRowUpdates`: each must change exactly one row, in a
+transaction of its own under auto-commit or behind a savepoint inside the user's manual
+transaction.
 
 Only files named `Postgres*.java` / `MySql*.java` may reference `org.postgresql` /
 `org.mariadb` (enforced by `DriverImportGuardTest`). Bundled drivers: pgjdbc

@@ -18,7 +18,7 @@ IntelliJ Platform SDK — plus an AI layer that no stock edition offers in this 
 |------|--------------|
 | Connections | Add/edit/delete PostgreSQL and MySQL connections, Test Connection dialog, passwords in the IDE PasswordSafe (or session-only), SSL toggle, JDBC URL override |
 | Schema browser | Connection → schema → table/view → column tree with types and primary-key markers, metadata refresh, Copy Table/Schema DDL |
-| SQL console | Multi-line editor with SQL highlighting, Ctrl/Cmd+Enter to run, multi-statement scripts (quote/dollar-quote/comment-aware splitter), results grid (first 1000 rows), update counts, timing, server version |
+| SQL console | Multi-line editor with SQL highlighting, Ctrl/Cmd+Enter to run, multi-statement scripts (quote/dollar-quote/comment-aware splitter), results grid (first 1000 rows), update counts, timing, server version; edit cells (incl. Set NULL) and delete rows of single-table results with a key, then Submit them back as UPDATE / DELETE |
 | Table data | Double-click any table for a first-200-rows preview grid |
 | Liquibase support | SQL syntax highlighting injected into `<sql>` blocks of XML changelogs (root `<databaseChangeLog>` or a `liquibase` path segment); falls back to the plugin's own lightweight SQL highlighter when no SQL language is installed |
 | Column ↔ value aid | In long INSERTs: caret on a column highlights the matching value in every VALUES tuple (and vice versa), plus inline gray column-name hints before each value. Works in .sql files, Liquibase XML and the SQL console |

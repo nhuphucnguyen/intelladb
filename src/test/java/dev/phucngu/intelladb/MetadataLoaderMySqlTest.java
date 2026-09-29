@@ -152,6 +152,28 @@ class MetadataLoaderMySqlTest {
 
             SqlResult typed = session.execute("SELECT amount FROM " + DATABASE + ".pet");
             assertEquals("DECIMAL UNSIGNED", typed.columnType(0));
+
+            // Edits write to the base column behind an alias.
+            assertEquals(List.of("id"), session.execute("SELECT p.id AS ident FROM " + DATABASE + ".pet p").sourceColumns);
+        }
+    }
+
+    @Test
+    void editedRowsAreWrittenBackAllOrNothing() {
+        String owner = DATABASE + ".owner";
+        try (DbSession session = new DbSession(config(), password())) {
+            SqlResult inserted = session.execute("INSERT INTO " + owner + " (id, code, region) VALUES (101, 'edit-a', 'eu'), (102, 'edit-b', 'eu')");
+            assertTrue(inserted.isSuccessful(), inserted.text);
+            SqlResult ok = session.applyRowUpdates(List.of("UPDATE " + owner + " SET code = 'aa' WHERE id = 101"));
+            assertTrue(ok.isSuccessful(), ok.text);
+            SqlResult failed = session.applyRowUpdates(List.of(
+                    "UPDATE " + owner + " SET code = 'x' WHERE id = 102",
+                    "UPDATE " + owner + " SET code = 'y' WHERE id = 999"));
+            assertFalse(failed.isSuccessful());
+            SqlResult codes = session.execute("SELECT code FROM " + owner + " WHERE id > 100 ORDER BY id");
+            assertEquals("aa", codes.rows.get(0)[0]);
+            assertEquals("edit-b", codes.rows.get(1)[0]);
+            session.execute("DELETE FROM " + owner + " WHERE id > 100");
         }
     }
 

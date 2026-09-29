@@ -155,4 +155,13 @@ public interface DbDialect {
     default String @Nullable [] sourceTable(@NotNull ResultSetMetaData meta, int columnCount) {
         return null;
     }
+
+    /**
+     * Name of result column {@code column} (1-based) in its base table, whatever it was
+     * aliased to — what an UPDATE of an edited cell targets. Most drivers (MariaDB) report
+     * it as the column name, with the alias as the label.
+     */
+    default @Nullable String baseColumnName(@NotNull ResultSetMetaData meta, int column) throws java.sql.SQLException {
+        return meta.getColumnName(column);
+    }
 }

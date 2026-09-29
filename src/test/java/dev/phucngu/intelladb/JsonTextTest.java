@@ -26,6 +26,13 @@ class JsonTextTest {
     }
 
     @Test
+    void compactsJsonKeepingOrderAndNumbers() {
+        assertEquals("{\"b\":1.50,\"a\":[true,null,\"<x>\"]}",
+                JsonText.compactIfJson("{\n  \"b\": 1.50,\n  \"a\": [true, null, \"<x>\"]\n}"));
+        assertEquals("not json", JsonText.compactIfJson("not json"));
+    }
+
+    @Test
     void leavesNonJsonUntouched() {
         assertEquals("hello world", JsonText.prettyIfJson("hello world"));
         assertEquals("{unclosed", JsonText.prettyIfJson("{unclosed"));

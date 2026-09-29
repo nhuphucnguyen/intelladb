@@ -161,6 +161,14 @@ public final class PostgresDialect implements DbDialect {
         return value instanceof org.postgresql.util.PGobject pg ? pg.getValue() : value;
     }
 
+    /** pgjdbc's column name is the label; the base name comes from its own metadata interface. */
+    @Override
+    public @Nullable String baseColumnName(@NotNull ResultSetMetaData meta, int column) throws SQLException {
+        return meta.isWrapperFor(org.postgresql.PGResultSetMetaData.class)
+                ? meta.unwrap(org.postgresql.PGResultSetMetaData.class).getBaseColumnName(column)
+                : meta.getColumnName(column);
+    }
+
     /** pgjdbc reports the origin of plain column references, so a join or expression yields null. */
     @Override
     public String @Nullable [] sourceTable(@NotNull ResultSetMetaData meta, int columnCount) {

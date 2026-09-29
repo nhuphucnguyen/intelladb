@@ -34,12 +34,16 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.ActionEvent;
+import java.util.List;
 
 /**
  * Full value viewer for a results-grid cell (double-click, or the {} icon of a JSON
- * cell). JSON is pretty-printed in a highlighted, read-only editor and its properties can
- * be sorted by name (A → Z / Z → A, at every nesting level) — handy for comparing
- * documents whose keys come in different orders. Other values are shown as-is, wrapped.
+ * cell). JSON is pretty-printed in a highlighted editor and its properties can be sorted
+ * by name (A → Z / Z → A, at every nesting level) — handy for comparing documents whose
+ * keys come in different orders. Other values are shown as-is, wrapped.
+ * <p>
+ * For a writable cell the editor is editable: Apply hands the new text back as a pending
+ * edit of the cell (saved by the grid's Submit), Discard drops it. It is read-only otherwise.
  */
 public final class CellValueDialog extends DialogWrapper {
 
@@ -48,16 +52,27 @@ public final class CellValueDialog extends DialogWrapper {
     private final Project project;
     private final String text;
     private final boolean json;
+    private final boolean editable;
+    /** The text as first shown; the edit counts as a change only when the document differs from it. */
+    private String initialShown;
     private final Document document = EditorFactory.getInstance().createDocument("");
     private final EditorEx viewer;
     private final ComboBox<JsonText.KeyOrder> order = new ComboBox<>(JsonText.KeyOrder.values());
 
     public CellValueDialog(@Nullable Project project, @NotNull String columnName, @NotNull String value) {
+        this(project, columnName, value, false);
+    }
+
+    public CellValueDialog(@Nullable Project project, @NotNull String columnName, @NotNull String value,
+                           boolean editable) {
         super(project);
         this.project = project;
         this.text = value;
         this.json = JsonText.isJson(value);
-        this.viewer = (EditorEx) EditorFactory.getInstance().createViewer(document, project);
+        this.editable = editable;
+        this.viewer = (EditorEx) (editable
+                ? EditorFactory.getInstance().createEditor(document, project)
+                : EditorFactory.getInstance().createViewer(document, project));
         configureViewer();
         order.setRenderer(SimpleListCellRenderer.create("", o -> o.label));
         order.setSelectedItem(savedOrder());
@@ -66,9 +81,45 @@ public final class CellValueDialog extends DialogWrapper {
             render();
         });
         setTitle((json ? "JSON — " : "Value — ") + columnName);
-        setOKButtonText("Close");
+        if (editable) {
+            setOKButtonText("Apply");
+            setCancelButtonText("Discard");
+        } else {
+            setOKButtonText("Close");
+        }
         render();
+        initialShown = document.getText();
         init();
+        if (editable && json) {
+            initValidation(); // warns (without blocking Apply) while the JSON doesn't parse
+        }
+    }
+
+    /**
+     * The edited value, or null when nothing changed. JSON that was on one line comes back
+     * compact, so a reformatted-but-equal document is no change and the cell stays one line.
+     */
+    public @Nullable String editedValue() {
+        String edited = document.getText();
+        if (edited.equals(initialShown)) {
+            return null;
+        }
+        boolean oneLine = text.indexOf('\n') < 0 && text.indexOf('\r') < 0;
+        String value = json && oneLine && JsonText.isJson(edited) ? JsonText.compactIfJson(edited) : edited;
+        return value.equals(json && oneLine ? JsonText.compactIfJson(text) : text) ? null : value;
+    }
+
+    @Override
+    protected @Nullable com.intellij.openapi.ui.ValidationInfo doValidate() {
+        if (editable && json && !document.getText().isBlank() && !JsonText.isJson(document.getText())) {
+            return new com.intellij.openapi.ui.ValidationInfo("Not valid JSON").asWarning().withOKEnabled();
+        }
+        return null;
+    }
+
+    @Override
+    public @Nullable JComponent getPreferredFocusedComponent() {
+        return editable ? viewer.getContentComponent() : super.getPreferredFocusedComponent();
     }
 
     @Override
@@ -123,9 +174,13 @@ public final class CellValueDialog extends DialogWrapper {
         }
     }
 
-    /** The text as shown: pretty-printed (and sorted) JSON, or the raw value. */
+    /**
+     * The text as shown: pretty-printed (and sorted) JSON, or the raw value. While editing,
+     * the order applies to what is in the editor now (when it parses), so edits survive.
+     */
     private @NotNull String shownText() {
-        return json ? JsonText.prettyIfJson(text, selectedOrder()) : text;
+        String source = editable && initialShown != null ? document.getText() : text;
+        return json ? JsonText.prettyIfJson(source, selectedOrder()) : source;
     }
 
     private void render() {
@@ -136,11 +191,19 @@ public final class CellValueDialog extends DialogWrapper {
 
     @Override
     protected Action @NotNull [] createActions() {
+        List<Action> actions = new java.util.ArrayList<>();
         if (!json) {
-            return new Action[]{copyAction("Copy", () -> text), getOKAction()};
+            actions.add(copyAction("Copy", editable ? document::getText : () -> text));
+        } else {
+            actions.add(copyAction("Copy Original", () -> text));
+            actions.add(copyAction(editable ? "Copy Edited" : "Copy Formatted",
+                    editable ? document::getText : this::shownText));
         }
-        return new Action[]{copyAction("Copy Original", () -> text),
-                copyAction("Copy Formatted", this::shownText), getOKAction()};
+        if (editable) {
+            actions.add(getCancelAction());
+        }
+        actions.add(getOKAction());
+        return actions.toArray(Action[]::new);
     }
 
     private static @NotNull Action copyAction(@NotNull String name, @NotNull java.util.function.Supplier<String> value) {

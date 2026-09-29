@@ -252,6 +252,71 @@ public final class DbSession implements AutoCloseable {
         }
     }
 
+    /**
+     * Runs the UPDATEs / DELETEs of edited grid rows as one unit: each must change exactly one row, or
+     * none of them stick. With auto-commit on they get their own transaction; inside a
+     * manual transaction they are undone to a savepoint on failure and otherwise stay
+     * pending until the user commits. Must not be called on the EDT.
+     */
+    public synchronized @NotNull SqlResult applyRowUpdates(@NotNull List<String> statements) {
+        long start = System.currentTimeMillis();
+        lastActivity = start;
+        String sql = String.join(";\n", statements);
+        try {
+            ensureOpen();
+            boolean autoCommit = connection.getAutoCommit();
+            java.sql.Savepoint savepoint = autoCommit ? null : connection.setSavepoint();
+            if (autoCommit) {
+                connection.setAutoCommit(false);
+            }
+            try {
+                try (Statement st = connection.createStatement()) {
+                    running = st;
+                    for (String update : statements) {
+                        long count = st.executeLargeUpdate(update);
+                        if (count != 1) {
+                            throw new SQLException((count == 0 ? "No row matched (changed or deleted meanwhile?)"
+                                    : count + " rows matched instead of one") + ": " + update);
+                        }
+                    }
+                }
+                if (autoCommit) {
+                    connection.commit();
+                } else {
+                    try {
+                        connection.releaseSavepoint(savepoint);
+                    } catch (SQLException unsupported) {
+                        // Harmless: the savepoint ends with the transaction anyway.
+                    }
+                }
+            } catch (SQLException e) {
+                try {
+                    if (autoCommit) {
+                        connection.rollback();
+                    } else {
+                        connection.rollback(savepoint);
+                    }
+                } catch (SQLException ignored) {
+                }
+                throw e;
+            } finally {
+                if (autoCommit) {
+                    connection.setAutoCommit(true);
+                }
+            }
+            int n = statements.size();
+            return SqlResult.message(sql, n + " row" + (n == 1 ? "" : "s") + " changed"
+                    + (autoCommit ? "" : " (pending: commit the transaction to keep the changes)"),
+                    System.currentTimeMillis() - start);
+        } catch (SQLException e) {
+            return SqlResult.error(sql, e.getMessage() == null ? e.toString() : e.getMessage(),
+                    System.currentTimeMillis() - start);
+        } finally {
+            running = null;
+            lastActivity = System.currentTimeMillis();
+        }
+    }
+
     private static @NotNull SqlResult materialize(@NotNull String sql, @NotNull ResultSet rs,
                                                   long duration, @NotNull DbDialect dialect) throws SQLException {
         ResultSetMetaData meta = rs.getMetaData();
@@ -264,6 +329,7 @@ public final class DbSession implements AutoCloseable {
             types.add(type == null ? "" : type);
         }
         List<Object[]> rows = new ArrayList<>();
+        boolean[] binary = new boolean[columnCount];
         boolean truncated = false;
         while (rs.next()) {
             if (rows.size() >= SqlResult.MAX_ROWS) {
@@ -274,7 +340,10 @@ public final class DbSession implements AutoCloseable {
             for (int i = 1; i <= columnCount; i++) {
                 Object value = rs.getObject(i);
                 row[i - 1] = switch (value) {
-                    case byte[] bytes -> "<binary " + bytes.length + "B>";
+                    case byte[] bytes -> {
+                        binary[i - 1] = true;
+                        yield "<binary " + bytes.length + "B>";
+                    }
                     case null -> null;
                     default -> dialect.displayValue(value);
                 };
@@ -282,9 +351,15 @@ public final class DbSession implements AutoCloseable {
             rows.add(row);
         }
         String[] source = dialect.sourceTable(meta, columnCount);
-        return source == null
-                ? SqlResult.rows(sql, columns, types, rows, truncated, duration)
-                : SqlResult.rows(sql, columns, types, rows, truncated, duration, source[0], source[1]);
+        if (source == null) {
+            return SqlResult.rows(sql, columns, types, rows, truncated, duration);
+        }
+        List<String> sourceColumns = new ArrayList<>(columnCount);
+        for (int i = 1; i <= columnCount; i++) {
+            String base = binary[i - 1] ? null : dialect.baseColumnName(meta, i);
+            sourceColumns.add(base == null || base.isEmpty() ? null : base);
+        }
+        return SqlResult.rows(sql, columns, types, rows, truncated, duration, source[0], source[1], sourceColumns);
     }
 
     /** Reloads the schema catalog in the background of the caller's thread. */

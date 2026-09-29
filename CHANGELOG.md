@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Edit cells in the results grid and save them back.** When a result comes from one table
+  that has a primary key (or a unique key over NOT NULL columns) and includes the key
+  columns — a table data preview, or a console `SELECT` — double-click a cell (or just start
+  typing) to edit it. Edited cells are highlighted and counted in the status line until you
+  press **Submit** (the ↑ button, or Ctrl/Cmd+Enter in the grid), which writes one `UPDATE`
+  per edited row, all or nothing: every row must match exactly once, otherwise nothing
+  changes. With Tx: Auto the updates commit at once; in a manual transaction they stay
+  pending until Commit (a failed submit only undoes itself). **Revert Changes** drops the
+  edits. The UPDATEs are logged in the console's Output tab. Read-only connections, joins,
+  computed columns, keyless tables and binary values stay read-only (Submit's tooltip says
+  why).
+- **Edit JSON and long values in the value dialog.** For an editable cell, the JSON viewer
+  (the JSON badge, Shift+Enter, or double-clicking a multi-line value) opens as an editor:
+  **Apply** turns the text into a pending edit of the cell — highlighted, saved with Submit
+  like any other — and **Discard** drops it. Invalid JSON gets a warning but can still be
+  applied; JSON that was on one line is stored compact again, so only a real change counts.
+- The Submit arrow turns green while changes are waiting.
+- **Set NULL** on the selected cells (context menu, Ctrl+Alt+N / Cmd+Opt+N) — works on
+  multi-line values too.
+- **Delete rows** from the grid: the − button, the context menu or Ctrl+Y / Cmd+Backspace
+  marks the selected rows deleted (struck through, red); Submit runs one `DELETE … WHERE
+  <key>` per row in the same all-or-nothing unit as the updates, and Revert restores them.
+
 ## 0.2.0
 
 Released 2026-09-29: MySQL support and SQL completion.

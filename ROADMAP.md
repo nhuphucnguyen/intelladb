@@ -16,7 +16,7 @@ Built milestone by milestone, same discipline as the sibling
 | M9 | Reasoning-model handling (GLM): empty-answer detection pointing at Max tokens, ping budget 512, default max tokens 2048 — verified against the live Z.ai coding plan | ✅ |
 | M9b | Liquibase: SQL injection into XML `<sql>` blocks + INSERT column↔value caret aid with inline column hints (7 new unit tests) — verified in sandbox | ✅ |
 | M10 | More dialects: MySQL done (M53); SQLite / H2 remaining | in progress |
-| M11 | Data editing in the grid (inline edit, INSERT/UPDATE generation), CSV export | planned |
+| M11 | Data editing in the grid: inline edit + UPDATE, Set NULL and row deletion done (M56–M57), CSV export done; adding rows remaining | in progress |
 | M12 | AI: streaming responses, "explain this error", index advice, per-table context menus | planned |
 | M13 | Query history, bookmarks, schema compare | planned |
 | M9c | Conversation-style chat with inline results (replaced separate AI—Result tab) | ✅ |
@@ -25,6 +25,8 @@ Built milestone by milestone, same discipline as the sibling
 | M53 | MySQL dialect on the bundled MariaDB Connector/J: databases shown as schemas under the connection (like IntelliJ), `MySqlObjects` from information_schema, backtick/`#`/backslash-aware splitter and lexer, integration test against a real server | ✅ |
 | M54 | SQL completion for both dialects: `CursorAnalyzer` (clause, qualifier, table refs from text) → `SuggestionEngine` (catalog + `SqlVocabulary` per dialect) → IDE contributor; popup on `.`; unit + headless-IDE tests | ✅ |
 | M55 | FK-driven join completion (`JOIN ` → related table + ON, `ON ` → condition; popup opens on the space) and automatic initials-based table aliases after FROM / JOIN | ✅ |
+| M56 | Inline cell editing in the results grid: rows of one keyed table (PK, else NOT NULL unique key) are editable, pending edits highlighted, Submit (↑ / Ctrl/Cmd+Enter) writes one UPDATE per row all-or-nothing (own transaction under Tx: Auto, savepoint inside a manual one), Revert; base column names via `DbDialect.baseColumnName` | ✅ |
+| M57 | Set NULL (context menu, Ctrl+Alt+N / Cmd+Opt+N) and Delete Rows (−, Ctrl+Y / Cmd+Backspace): deleted rows struck through until Submit, which runs their DELETEs in the same all-or-nothing unit; grid context menu with the edit actions | ✅ |
 
 ## Verification record (M8)
 

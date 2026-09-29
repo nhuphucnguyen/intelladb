@@ -24,6 +24,12 @@ public final class SqlResult {
      */
     public final @Nullable String sourceSchema;
     public final @Nullable String sourceTable;
+    /**
+     * Base-table column of each result column when {@link #sourceTable} is known — what an
+     * edit of that cell updates; an entry is null when the column can't be written back
+     * (binary values are only shown as a size). Empty when there is no source table.
+     */
+    public final List<String> sourceColumns;
     /** Row values for {@link Kind#ROWS} (already String.valueOf'd). */
     public final List<Object[]> rows;
     /** True when the result set was truncated to {@link #MAX_ROWS}. */
@@ -39,12 +45,14 @@ public final class SqlResult {
 
     private SqlResult(Kind kind, List<String> columns, List<String> columnTypes, List<Object[]> rows,
                       boolean truncated, long updateCount, String text, long durationMs, String sql,
-                      @Nullable String sourceSchema, @Nullable String sourceTable) {
+                      @Nullable String sourceSchema, @Nullable String sourceTable,
+                      @NotNull List<String> sourceColumns) {
         this.kind = kind;
         this.columns = columns;
         this.columnTypes = columnTypes;
         this.sourceSchema = sourceSchema;
         this.sourceTable = sourceTable;
+        this.sourceColumns = sourceColumns;
         this.rows = rows;
         this.truncated = truncated;
         this.updateCount = updateCount;
@@ -68,20 +76,28 @@ public final class SqlResult {
                                  @NotNull List<String> columnTypes, @NotNull List<Object[]> rows,
                                  boolean truncated, long durationMs,
                                  @Nullable String sourceSchema, @Nullable String sourceTable) {
+        return rows(sql, columns, columnTypes, rows, truncated, durationMs, sourceSchema, sourceTable, List.of());
+    }
+
+    public static SqlResult rows(@NotNull String sql, @NotNull List<String> columns,
+                                 @NotNull List<String> columnTypes, @NotNull List<Object[]> rows,
+                                 boolean truncated, long durationMs,
+                                 @Nullable String sourceSchema, @Nullable String sourceTable,
+                                 @NotNull List<String> sourceColumns) {
         return new SqlResult(Kind.ROWS, columns, columnTypes, rows, truncated, -1, null, durationMs, sql,
-                sourceSchema, sourceTable);
+                sourceSchema, sourceTable, sourceColumns);
     }
 
     public static SqlResult update(@NotNull String sql, long updateCount, long durationMs) {
-        return new SqlResult(Kind.UPDATE_COUNT, List.of(), List.of(), List.of(), false, updateCount, null, durationMs, sql, null, null);
+        return new SqlResult(Kind.UPDATE_COUNT, List.of(), List.of(), List.of(), false, updateCount, null, durationMs, sql, null, null, List.of());
     }
 
     public static SqlResult message(@NotNull String sql, @NotNull String text, long durationMs) {
-        return new SqlResult(Kind.MESSAGE, List.of(), List.of(), List.of(), false, -1, text, durationMs, sql, null, null);
+        return new SqlResult(Kind.MESSAGE, List.of(), List.of(), List.of(), false, -1, text, durationMs, sql, null, null, List.of());
     }
 
     public static SqlResult error(@NotNull String sql, @NotNull String text, long durationMs) {
-        return new SqlResult(Kind.ERROR, List.of(), List.of(), List.of(), false, -1, text, durationMs, sql, null, null);
+        return new SqlResult(Kind.ERROR, List.of(), List.of(), List.of(), false, -1, text, durationMs, sql, null, null, List.of());
     }
 
     /** Type name of column {@code index}, or "" when the driver did not report one. */
@@ -96,6 +112,11 @@ public final class SqlResult {
         }
         String table = dialect.quote(sourceTable);
         return sourceSchema == null ? table : dialect.quote(sourceSchema) + "." + table;
+    }
+
+    /** Base column of result column {@code index}, or null when it is unknown or not writable. */
+    public @Nullable String sourceColumn(int index) {
+        return index < sourceColumns.size() ? sourceColumns.get(index) : null;
     }
 
     public boolean isSuccessful() {
