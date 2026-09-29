@@ -1,6 +1,12 @@
 package dev.phucngu.intelladb.ui;
 
 import com.intellij.icons.AllIcons;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.DefaultActionGroup;
+import com.intellij.openapi.project.DumbAwareAction;
+import com.intellij.ui.SimpleTextAttributes;
+import dev.phucngu.intelladb.IntellaDbIcons;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
@@ -37,6 +43,7 @@ import dev.phucngu.intelladb.schema.MetadataLoader;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.Action;
 import javax.swing.ButtonGroup;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.JButton;
@@ -61,20 +68,58 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 /**
- * Add/Edit connection dialog, laid out like IntelliJ's database tools: a name row, then
- * General / Options / SSL / Schemas / Advanced tabs, and Test Connection at the bottom.
+ * The "Data Sources" dialog, laid out like IntelliJ's database tools: on the left every
+ * connection, grouped into Global (all projects) and Project data sources, with add /
+ * remove / duplicate / make global-or-project; on the right the selected one's name row,
+ * General / Options / SSL / Schemas / Advanced tabs and Test Connection. Changes are kept
+ * per connection while switching and only saved by Apply or OK; Cancel drops them all.
  */
 public final class ConnectionDialog extends DialogWrapper {
 
     private static final String[] SAVE_MODES = {"Forever", "Until restart", "Never"};
     private static final String[] AUTH_MODES = {"User & Password", "No auth"};
 
+    /** One connection as edited in the dialog, saved only by Apply / OK. */
+    private static final class Draft {
+        /** The connection as last saved; null while it is new. */
+        @Nullable DbConfig saved;
+        /** Working copy the form reads from and writes to. */
+        DbConfig config;
+        /**
+         * What the form made of {@link #saved} when first shown: the form normalises a few
+         * fields, so "changed" compares against this rather than the stored connection.
+         */
+        @Nullable DbConfig baseline;
+        boolean global;
+        boolean savedGlobal;
+        String password = "";
+        String savedPassword = "";
+        boolean nameEdited;
+
+        Draft(@Nullable DbConfig saved, @NotNull DbConfig config, boolean global) {
+            this.saved = saved;
+            this.config = config;
+            this.global = global;
+            this.savedGlobal = global;
+            this.nameEdited = saved != null;
+        }
+    }
+
     private final Project project;
     private final ConnectionManager manager;
-    private final DbConfig original;   // null when creating
+    private final List<Draft> drafts = new ArrayList<>();
+    /** Saved connections removed in the dialog, deleted on Apply / OK. */
+    private final List<String> removed = new ArrayList<>();
+    private @Nullable Draft current;
+    /** Filling the form from a draft: field listeners must not treat that as user edits. */
+    private boolean loading;
+    private final javax.swing.DefaultListModel<Object> listModel = new javax.swing.DefaultListModel<>();
+    private final com.intellij.ui.components.JBList<Object> sourceList = new com.intellij.ui.components.JBList<>(listModel);
+    private final JPanel formPanel = new JPanel(new BorderLayout());
+    private static final String GLOBAL_HEADER = "Global Data Sources";
+    private static final String PROJECT_HEADER = "Project Data Sources";
 
     private final JBTextField nameField = new JBTextField();
-    private final JBCheckBox globalBox = new JBCheckBox("Global");
     /** The name follows host and database until the user types their own. */
     private boolean nameEdited;
     private boolean updatingName;
@@ -131,19 +176,47 @@ public final class ConnectionDialog extends DialogWrapper {
 
     private final JBLabel testStatus = new JBLabel();
     private final ActionLink testLink = new ActionLink("Test Connection", (java.awt.event.ActionListener) e -> testConnection());
-    private String originalPassword = "";
 
-    public ConnectionDialog(@NotNull Project project, @Nullable DbConfig config) {
+    /**
+     * Opens the dialog with every connection listed and {@code select} selected; null
+     * starts a new (project) connection instead.
+     */
+    public ConnectionDialog(@NotNull Project project, @Nullable DbConfig select) {
         super(project);
         this.project = project;
         this.manager = ConnectionManager.getInstance(project);
-        this.original = config == null ? null : config.copy();
-        setTitle(original == null ? "New Database Connection" : "Edit Connection '" + original.name + "'");
+        setTitle("Data Sources");
+        for (DbDialect dialect : Dialects.all()) {
+            dialectCombo.addItem(dialect.displayName());
+        }
+        Draft selected = null;
+        for (DbConfig config : manager.configs()) {
+            Draft draft = new Draft(config, config.copy(), manager.isGlobal(config.id));
+            String password = manager.readPassword(config);
+            draft.password = draft.savedPassword = password == null ? "" : password;
+            drafts.add(draft);
+            if (select != null && config.id.equals(select.id)) {
+                selected = draft;
+            }
+        }
         init();
-        loadFrom(original != null ? original : new DbConfig());
-        globalBox.setSelected(original != null && manager.isGlobal(original.id));
         wireListeners();
-        refreshEnabledState();
+        if (selected == null && (select == null || drafts.isEmpty())) {
+            selected = newDraft(Dialects.all().get(0));
+        } else if (selected == null) {
+            selected = drafts.get(0);
+        }
+        refreshList();
+        sourceList.setSelectedValue(selected, true);
+    }
+
+    private @NotNull Draft newDraft(@NotNull DbDialect dialect) {
+        DbConfig config = new DbConfig();
+        config.dialectId = dialect.id();
+        config.port = dialect.defaultPort();
+        Draft draft = new Draft(null, config, false);
+        drafts.add(draft);
+        return draft;
     }
 
     // ------------------------------------------------------------------ layout
@@ -165,8 +238,6 @@ public final class ConnectionDialog extends DialogWrapper {
         JPanel nameRow = new JPanel(new BorderLayout(JBUI.scale(8), 0));
         nameRow.add(new JLabel("Name:"), BorderLayout.WEST);
         nameRow.add(nameField, BorderLayout.CENTER);
-        globalBox.setToolTipText("Share this connection with all projects (otherwise it belongs to this project)");
-        nameRow.add(globalBox, BorderLayout.EAST);
         nameRow.setBorder(JBUI.Borders.emptyBottom(8));
 
         JPanel testRow = new JPanel(new HorizontalLayout(JBUI.scale(12)));
@@ -174,12 +245,226 @@ public final class ConnectionDialog extends DialogWrapper {
         testRow.add(testStatus);
         testRow.setBorder(JBUI.Borders.emptyTop(8));
 
+        formPanel.add(nameRow, BorderLayout.NORTH);
+        formPanel.add(tabs, BorderLayout.CENTER);
+        formPanel.add(testRow, BorderLayout.SOUTH);
+        formPanel.setBorder(JBUI.Borders.emptyLeft(12));
+
+        com.intellij.ui.JBSplitter splitter = new com.intellij.ui.JBSplitter(false, "IntellaDb.DataSources.split", 0.26f);
+        splitter.setFirstComponent(sourcesPanel());
+        splitter.setSecondComponent(formPanel);
+        splitter.setPreferredSize(JBUI.size(900, 560));
+        return splitter;
+    }
+
+    // ------------------------------------------------------------------ data source list
+
+    private @NotNull JComponent sourcesPanel() {
+        sourceList.getSelectionModel().setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
+        sourceList.setCellRenderer(new com.intellij.ui.ColoredListCellRenderer<>() {
+            @Override
+            protected void customizeCellRenderer(@NotNull javax.swing.JList<?> list, Object value, int index,
+                                                 boolean selected, boolean hasFocus) {
+                if (value instanceof String header) {
+                    append(header, SimpleTextAttributes.GRAYED_ATTRIBUTES);
+                    setBorder(JBUI.Borders.empty(index == 0 ? 2 : 10, 0, 2, 0));
+                    return;
+                }
+                Draft draft = (Draft) value;
+                setIcon(IntellaDbIcons.CONNECTION);
+                String name = draft.config.name.isBlank() ? "<unnamed>" : draft.config.name;
+                append(name, draft.saved == null ? SimpleTextAttributes.REGULAR_ITALIC_ATTRIBUTES
+                        : SimpleTextAttributes.REGULAR_ATTRIBUTES);
+                setBorder(JBUI.Borders.emptyLeft(8));
+            }
+        });
+        sourceList.addListSelectionListener(e -> {
+            if (e.getValueIsAdjusting()) {
+                return;
+            }
+            Object value = sourceList.getSelectedValue();
+            if (value instanceof String) { // headers can't be selected: stay on the current one
+                if (current != null) {
+                    sourceList.setSelectedValue(current, false);
+                }
+                return;
+            }
+            select((Draft) value);
+        });
+
+        DefaultActionGroup add = new DefaultActionGroup("Add", true);
+        add.getTemplatePresentation().setIcon(AllIcons.General.Add);
+        add.getTemplatePresentation().setDescription("Add a data source");
+        for (DbDialect dialect : Dialects.all()) {
+            add.add(new DumbAwareAction(dialect.displayName()) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e) {
+                    commitCurrent();
+                    Draft draft = newDraft(dialect);
+                    refreshList();
+                    sourceList.setSelectedValue(draft, true);
+                    nameField.requestFocusInWindow();
+                }
+            });
+        }
+        DefaultActionGroup group = new DefaultActionGroup();
+        group.add(add);
+        group.add(new ListAction("Remove", "Remove the data source (on Apply / OK)", AllIcons.General.Remove) {
+            @Override
+            public void actionPerformed(@NotNull AnActionEvent e) {
+                removeCurrent();
+            }
+        });
+        group.add(new ListAction("Duplicate", "Copy the data source", AllIcons.Actions.Copy) {
+            @Override
+            public void actionPerformed(@NotNull AnActionEvent e) {
+                duplicateCurrent();
+            }
+        });
+        group.add(new ListAction("Make Global", "Share the data source with all projects", IntellaDbIcons.MAKE_GLOBAL) {
+            @Override
+            public void actionPerformed(@NotNull AnActionEvent e) {
+                if (current != null) {
+                    current.global = !current.global;
+                    refreshList();
+                    sourceList.setSelectedValue(current, true);
+                }
+            }
+
+            @Override
+            public void update(@NotNull AnActionEvent e) {
+                super.update(e);
+                boolean global = current != null && current.global;
+                e.getPresentation().setText(global ? "Make Project" : "Make Global");
+                e.getPresentation().setDescription(global ? "Keep the data source in this project only"
+                        : "Share the data source with all projects");
+                e.getPresentation().setIcon(global ? IntellaDbIcons.MAKE_PROJECT : IntellaDbIcons.MAKE_GLOBAL);
+            }
+        });
+        com.intellij.openapi.actionSystem.ActionToolbar toolbar = com.intellij.openapi.actionSystem.ActionManager
+                .getInstance().createActionToolbar("IntellaDbDataSources", group, true);
+        toolbar.setTargetComponent(sourceList);
+
+        JBLabel title = new JBLabel("Data Sources");
+        title.setFont(JBUI.Fonts.label().asBold());
+        title.setBorder(JBUI.Borders.empty(0, 4, 4, 0));
+        JPanel top = new JPanel(new BorderLayout());
+        top.add(title, BorderLayout.NORTH);
+        top.add(toolbar.getComponent(), BorderLayout.CENTER);
         JPanel panel = new JPanel(new BorderLayout());
-        panel.add(nameRow, BorderLayout.NORTH);
-        panel.add(tabs, BorderLayout.CENTER);
-        panel.add(testRow, BorderLayout.SOUTH);
-        panel.setPreferredSize(JBUI.size(640, 520));
+        panel.add(top, BorderLayout.NORTH);
+        JBScrollPane scroll = new JBScrollPane(sourceList);
+        scroll.setBorder(JBUI.Borders.empty());
+        panel.add(scroll, BorderLayout.CENTER);
         return panel;
+    }
+
+    /** Toolbar action on the selected data source. */
+    private abstract class ListAction extends DumbAwareAction {
+        ListAction(@NotNull String text, @NotNull String description, @NotNull javax.swing.Icon icon) {
+            super(text, description, icon);
+        }
+
+        @Override
+        public void update(@NotNull AnActionEvent e) {
+            e.getPresentation().setEnabled(current != null);
+        }
+
+        @Override
+        public @NotNull ActionUpdateThread getActionUpdateThread() {
+            return ActionUpdateThread.EDT;
+        }
+    }
+
+    /** Rebuilds the list: global data sources, then the project's, each under its header when non-empty. */
+    private void refreshList() {
+        Draft keep = current;
+        loading = true; // selection events while rebuilding are not user picks
+        try {
+            listModel.clear();
+            for (boolean global : new boolean[]{true, false}) {
+                List<Draft> group = drafts.stream().filter(d -> d.global == global).toList();
+                if (!group.isEmpty()) {
+                    listModel.addElement(global ? GLOBAL_HEADER : PROJECT_HEADER);
+                    group.forEach(listModel::addElement);
+                }
+            }
+        } finally {
+            loading = false;
+        }
+        if (keep != null && drafts.contains(keep)) {
+            sourceList.setSelectedValue(keep, true);
+        }
+    }
+
+    /** Shows {@code draft} in the form, keeping what was typed for the previous one. */
+    private void select(@Nullable Draft draft) {
+        if (loading || draft == current) {
+            return;
+        }
+        commitCurrent();
+        current = draft;
+        formPanel.setVisible(draft != null);
+        if (draft != null) {
+            loadFrom(draft);
+            if (draft.saved != null && draft.baseline == null) {
+                DbConfig baseline = draft.config.copy();
+                applyTo(baseline);
+                if (baseline.name.isBlank()) {
+                    baseline.name = autoName();
+                }
+                draft.baseline = baseline;
+            }
+        }
+    }
+
+    /** Copies the form into the current draft. */
+    private void commitCurrent() {
+        if (current == null) {
+            return;
+        }
+        applyTo(current.config);
+        if (current.config.name.isBlank()) {
+            current.config.name = autoName();
+        }
+        current.password = new String(passwordField.getPassword());
+        current.nameEdited = nameEdited;
+        sourceList.repaint();
+    }
+
+    private void removeCurrent() {
+        if (current == null) {
+            return;
+        }
+        Draft gone = current;
+        int index = drafts.indexOf(gone);
+        drafts.remove(gone);
+        if (gone.saved != null) {
+            removed.add(gone.saved.id);
+        }
+        current = null; // nothing to commit for it
+        refreshList();
+        if (drafts.isEmpty()) {
+            select(null);
+        } else {
+            sourceList.setSelectedValue(drafts.get(Math.min(index, drafts.size() - 1)), true);
+        }
+    }
+
+    private void duplicateCurrent() {
+        if (current == null) {
+            return;
+        }
+        commitCurrent();
+        DbConfig copy = current.config.copy();
+        copy.id = java.util.UUID.randomUUID().toString();
+        copy.name = current.config.name + " (copy)";
+        Draft draft = new Draft(null, copy, current.global);
+        draft.password = current.password;
+        draft.nameEdited = true;
+        drafts.add(drafts.indexOf(current) + 1, draft);
+        refreshList();
+        sourceList.setSelectedValue(draft, true);
     }
 
     private @NotNull JComponent generalTab() {
@@ -302,15 +587,28 @@ public final class ConnectionDialog extends DialogWrapper {
 
     // ------------------------------------------------------------------ model <-> fields
 
-    private void loadFrom(@NotNull DbConfig config) {
-        for (DbDialect dialect : Dialects.all()) {
-            dialectCombo.addItem(dialect.displayName());
-            if (dialect.id().equals(config.dialectId)) {
-                dialectCombo.setSelectedItem(dialect.displayName());
-            }
+    private void loadFrom(@NotNull Draft draft) {
+        loading = true;
+        try {
+            loadFields(draft);
+        } finally {
+            loading = false;
         }
+        testStatus.setText("");
+        testStatus.setToolTipText(null);
+        refreshEnabledState();
+        if (!nameEdited) {
+            updateAutoName();
+        }
+    }
+
+    private void loadFields(@NotNull Draft draft) {
+        DbConfig config = draft.config;
+        dialectCombo.setSelectedItem(config.dialect().displayName());
         nameField.setText(config.name);
-        nameEdited = original != null;
+        nameEdited = draft.nameEdited;
+        databasesLoaded = false;
+        schemasLoaded = false;
         urlOnlyType.setSelected(config.urlOnly);
         defaultType.setSelected(!config.urlOnly);
         hostField.setText(config.host);
@@ -318,20 +616,11 @@ public final class ConnectionDialog extends DialogWrapper {
         authCombo.setSelectedIndex(config.noAuth ? 1 : 0);
         userField.setText(config.user);
         saveCombo.setSelectedIndex(config.savePassword ? 0 : config.neverRememberPassword ? 2 : 1);
+        databaseCombo.setModel(new DefaultComboBoxModel<>());
         databaseCombo.setSelectedItem(config.database);
-        if (!config.jdbcUrlOverride.isBlank()) {
-            urlOverridden = true;
-            urlField.setText(config.jdbcUrlOverride);
-        } else {
-            urlField.setText(config.dialect().jdbcUrl(config));
-        }
-        if (original != null) {
-            String saved = manager.readPassword(original);
-            if (saved != null) {
-                passwordField.setText(saved);
-                originalPassword = saved;
-            }
-        }
+        urlOverridden = !config.jdbcUrlOverride.isBlank();
+        urlField.setText(urlOverridden ? config.jdbcUrlOverride : config.dialect().jdbcUrl(config));
+        passwordField.setText(draft.password);
 
         readOnly.setSelected(config.readOnly);
         txCombo.setSelectedIndex(config.autoCommit ? 0 : 1);
@@ -349,11 +638,15 @@ public final class ConnectionDialog extends DialogWrapper {
         keyFile.setText(config.sslKey);
 
         allSchemas.setSelected(config.schemas.isEmpty());
+        schemaList.clear();
+        schemaStatus.setText(" ");
         for (String schema : config.schemas) {
             schemaList.addItem(schema, schema, true);
         }
         showSystemSchemas.setSelected(config.showSystemSchemas);
 
+        stopEditing();
+        propertiesModel.setRowCount(0);
         config.driverProperties.forEach((key, value) -> propertiesModel.addRow(new Object[]{key, value}));
         updateUrlHint();
     }
@@ -403,13 +696,16 @@ public final class ConnectionDialog extends DialogWrapper {
     }
 
     private @NotNull DbConfig snapshot() {
-        DbConfig probe = original != null ? original.copy() : new DbConfig();
+        DbConfig probe = current != null ? current.config.copy() : new DbConfig();
         applyTo(probe);
         return probe;
     }
 
     @Override
     protected @Nullable ValidationInfo doValidate() {
+        if (current == null) {
+            return null;
+        }
         if (urlOnlyType.isSelected() || urlOverridden) {
             if (urlField.getText().isBlank()) {
                 return new ValidationInfo("Enter the JDBC URL", urlField);
@@ -425,20 +721,78 @@ public final class ConnectionDialog extends DialogWrapper {
 
     @Override
     protected void doOKAction() {
-        DbConfig target = original != null ? original : new DbConfig();
-        String password = new String(passwordField.getPassword());
-        boolean storageChanged = original != null && (original.savePassword != (saveCombo.getSelectedIndex() == 0)
-                || original.neverRememberPassword != (saveCombo.getSelectedIndex() == 2));
-        applyTo(target);
-        if (target.name.isBlank()) {
-            target.name = autoName();
+        if (save()) {
+            super.doOKAction();
         }
-        if (target.noAuth) {
-            password = "";
+    }
+
+    @Override
+    protected Action @NotNull [] createActions() {
+        return new Action[]{getCancelAction(), new DialogWrapperAction("Apply") {
+            @Override
+            protected void doAction(java.awt.event.ActionEvent e) {
+                if (doValidate() == null) {
+                    save();
+                }
+            }
+        }, getOKAction()};
+    }
+
+    /**
+     * Writes every draft that changed (and deletes the removed ones); a changed connection is
+     * disconnected so its next use picks up the new settings. False — with the offending
+     * data source selected — when one isn't valid.
+     */
+    private boolean save() {
+        commitCurrent();
+        for (Draft draft : drafts) {
+            if (problem(draft.config) != null) {
+                sourceList.setSelectedValue(draft, true);
+                return false;
+            }
         }
-        manager.saveConfig(target, password, storageChanged || !password.equals(originalPassword),
-                globalBox.isSelected());
-        super.doOKAction();
+        for (String id : removed) {
+            manager.deleteConfig(id);
+            ConsoleStore.getInstance(project).remove(id);
+        }
+        removed.clear();
+        for (Draft draft : drafts) {
+            DbConfig target = draft.config;
+            String password = target.noAuth ? "" : draft.password;
+            boolean settingsChanged = draft.saved == null
+                    || !sameSettings(draft.baseline != null ? draft.baseline : draft.saved, target);
+            boolean passwordChanged = !password.equals(draft.savedPassword) || (draft.saved != null
+                    && (draft.saved.savePassword != target.savePassword
+                    || draft.saved.neverRememberPassword != target.neverRememberPassword));
+            if (!settingsChanged && !passwordChanged && draft.global == draft.savedGlobal) {
+                continue;
+            }
+            boolean existed = draft.saved != null;
+            manager.saveConfig(target, password, draft.saved == null || passwordChanged, draft.global);
+            if (existed && (settingsChanged || passwordChanged)) {
+                manager.disconnect(target.id);
+            }
+            draft.saved = target;
+            draft.baseline = target.copy();
+            draft.config = target.copy();
+            draft.savedGlobal = draft.global;
+            draft.savedPassword = password;
+        }
+        sourceList.repaint();
+        return true;
+    }
+
+    /** Why a draft can't be saved, or null (for drafts not shown in the form; the form has doValidate). */
+    private static @Nullable String problem(@NotNull DbConfig config) {
+        if (config.urlOnly || !config.jdbcUrlOverride.isBlank()) {
+            return config.jdbcUrlOverride.isBlank() ? "Enter the JDBC URL" : null;
+        }
+        return config.host.isBlank() ? "Enter the host" : null;
+    }
+
+    private static boolean sameSettings(@NotNull DbConfig a, @NotNull DbConfig b) {
+        return com.intellij.openapi.util.JDOMUtil.areElementsEqual(
+                com.intellij.util.xmlb.XmlSerializer.serialize(a), com.intellij.util.xmlb.XmlSerializer.serialize(b));
     }
 
     @Override
@@ -450,6 +804,9 @@ public final class ConnectionDialog extends DialogWrapper {
 
     private void wireListeners() {
         dialectCombo.addActionListener(e -> {
+            if (loading) {
+                return;
+            }
             portSpinner.setNumber(selectedDialect().defaultPort());
             fillSslModes(String.valueOf(sslModeCombo.getSelectedItem()));
             fieldsChanged();
@@ -467,7 +824,7 @@ public final class ConnectionDialog extends DialogWrapper {
         autoDisconnect.addActionListener(e -> refreshEnabledState());
         allSchemas.addActionListener(e -> refreshEnabledState());
         showSystemSchemas.addActionListener(e -> {
-            if (schemasLoaded) {
+            if (schemasLoaded && !loading) {
                 loadSchemas();
             }
         });
@@ -479,14 +836,18 @@ public final class ConnectionDialog extends DialogWrapper {
         });
         portSpinner.addChangeListener(e -> fieldsChanged());
         onChange(urlField, () -> {
-            if (!updatingUrl) {
+            if (!updatingUrl && !loading) {
                 urlOverridden = !urlField.getText().trim().equals(generatedUrl());
                 updateUrlHint();
             }
         });
         onChange(nameField, () -> {
-            if (!updatingName) {
+            if (!updatingName && !loading) {
                 nameEdited = !nameField.getText().isBlank();
+            }
+            if (!loading && current != null) { // the list shows the name as it is typed
+                current.config.name = nameField.getText().trim();
+                sourceList.repaint();
             }
         });
         databaseCombo.addPopupMenuListener(new PopupMenuListener() {
@@ -506,9 +867,6 @@ public final class ConnectionDialog extends DialogWrapper {
             public void popupMenuCanceled(PopupMenuEvent e) {
             }
         });
-        if (!nameEdited) {
-            updateAutoName();
-        }
     }
 
     /** Fills the SSL mode dropdown from the selected dialect, keeping {@code keep} when it is offered. */
@@ -520,6 +878,9 @@ public final class ConnectionDialog extends DialogWrapper {
 
     /** Host, port or database changed: regenerate the URL (dropping a typed override) and the name. */
     private void fieldsChanged() {
+        if (loading) {
+            return;
+        }
         if (!urlOnlyType.isSelected()) {
             urlOverridden = false;
             updatingUrl = true;

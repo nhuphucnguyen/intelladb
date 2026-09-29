@@ -22,11 +22,17 @@
 - The Submit arrow turns green while changes are waiting.
 - **Global connections**, shared by every project in the IDE. **Make Global** (↗ in the DB
   Explorer toolbar, or the connection's context menu) moves a connection out of the project
-  into the IDE-wide store; **Make Project** moves it back. The connection dialog has a
-  *Global* checkbox too, so a new connection can start out global. Global connections are
+  into the IDE-wide store; **Make Project** moves it back. Global connections are
   listed first and marked "· global"; each project keeps its own sessions, consoles and
   history for them, and the saved password is shared. Deleting one removes it everywhere
   (the confirmation says so).
+- **One "Data Sources" dialog for all connections**, as in IntelliJ: Add and Edit open it
+  with every connection listed on the left under *Global Data Sources* and *Project Data
+  Sources* — the one you right-clicked (or a new one) selected — and its settings on the
+  right. The list's toolbar adds (per driver), removes, duplicates, and makes a data source
+  global or project (↗ / ↙). Edits are kept per connection while you switch between them and
+  saved only by **Apply** or **OK**; Cancel drops them all. Only connections whose settings
+  actually changed are saved and reconnected.
 - **Set NULL** on the selected cells (context menu, Ctrl+Alt+N / Cmd+Opt+N) — works on
   multi-line values too.
 - **Delete rows** from the grid: the − button, the context menu or Ctrl+Y / Cmd+Backspace

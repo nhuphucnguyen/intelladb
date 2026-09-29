@@ -27,7 +27,7 @@ Built milestone by milestone, same discipline as the sibling
 | M55 | FK-driven join completion (`JOIN ` → related table + ON, `ON ` → condition; popup opens on the space) and automatic initials-based table aliases after FROM / JOIN | ✅ |
 | M56 | Inline cell editing in the results grid: rows of one keyed table (PK, else NOT NULL unique key) are editable, pending edits highlighted, Submit (↑ / Ctrl/Cmd+Enter) writes one UPDATE per row all-or-nothing (own transaction under Tx: Auto, savepoint inside a manual one), Revert; base column names via `DbDialect.baseColumnName` | ✅ |
 | M57 | Set NULL (context menu, Ctrl+Alt+N / Cmd+Opt+N) and Delete Rows (−, Ctrl+Y / Cmd+Backspace): deleted rows struck through until Submit, which runs their DELETEs in the same all-or-nothing unit; grid context menu with the edit actions | ✅ |
-| M58 | Global connections: app-level `GlobalConnections` store merged into each project's `ConnectionManager`; Make Global / Make Project (toolbar ↗, context menu, dialog checkbox); sessions stay per project | ✅ |
+| M58 | Global connections: app-level `GlobalConnections` store merged into each project's `ConnectionManager`; Make Global / Make Project (toolbar ↗, context menu, dialog checkbox); sessions stay per project; "Data Sources" dialog listing every connection (Global / Project groups, add per driver, remove, duplicate, ↗ / ↙), edits kept per connection until Apply / OK | ✅ |
 
 ## Verification record (M8)
 

@@ -474,10 +474,9 @@ public final class ConnectionTreePanel implements Disposable {
     }
 
     private void editConnection(@NotNull DbConfig config) {
+        // The dialog lists every connection with this one selected; it disconnects the ones it changes.
         ConnectionDialog dialog = new ConnectionDialog(project, config);
         if (dialog.showAndGet()) {
-            // Settings may have changed; force a fresh session next time.
-            manager.disconnect(config.id);
             explorer.refreshTree();
         }
     }
