@@ -7,7 +7,7 @@ import org.jetbrains.annotations.NotNull;
 import java.util.Set;
 
 /**
- * Hand-rolled SQL tokenizer for highlighting: strings with '' escapes, quoted identifiers,
+ * Hand-rolled SQL tokenizer for highlighting: strings with '' escapes, quoted identifiers ("…" and `…`),
  * line/block comments, numbers, and keyword-aware words. Deliberately permissive —
  * unknown characters become OPERATOR tokens rather than errors.
  */
@@ -131,9 +131,9 @@ public final class IntellaSqlLexer extends LexerBase {
             tokenType = IntellaSqlLanguage.Tokens.STRING;
             return;
         }
-        if (c == '"') {
+        if (c == '"' || c == '`') { // backticks quote identifiers in MySQL
             int i = position + 1;
-            while (i < endOffset && buffer.charAt(i) != '"') {
+            while (i < endOffset && buffer.charAt(i) != c) {
                 i++;
             }
             tokenEnd = Math.min(i + 1, endOffset);

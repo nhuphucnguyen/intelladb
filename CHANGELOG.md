@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **MySQL connections** (driver "MySQL"), through the bundled MariaDB Connector/J (LGPL).
+  As in IntelliJ's database tools, MySQL databases appear as schemas directly under the
+  connection (no database level); the "N of M" badge sits on the connection. Keys,
+  foreign keys, indexes, check constraints, functions/procedures and users come from
+  `information_schema`. The URL field shows the familiar `jdbc:mysql://host:port` form
+  (rewritten for the driver when connecting; `jdbc:mariadb:` URLs work too), the Database
+  field is optional, SSL modes are trust / verify-ca / verify-full, read-only mode blocks
+  writes and DDL, and the console's schema picker switches with `USE`.
+- The SQL splitter and highlighter understand MySQL syntax: backtick identifiers,
+  `#` comments and backslash escapes in strings.
+- The AI prompt names the connection's SQL dialect, and answers fenced as ```mysql are
+  recognised.
+
+### Changed
+- Database-specific behaviour now lives behind `DbDialect` (namespace model, identifier
+  quoting, LIMIT, schema switching, system-schema check, splitter options, SSL modes,
+  driver, driver-specific values and result metadata). PostgreSQL behaviour is unchanged,
+  except that schema names in generated DDL are quoted when they need it.
+- JDBC drivers are connected through `Driver.connect` instead of `DriverManager`.
+- A system schema ticked in the connection dialog's Schemas tab stays in the list and
+  is introspected even while "Show internal system schemas" is off.
+- Numeric result columns are recognised by normalised type name, including MySQL types.
+
 ## 0.3.1
 
 ### Fixed

@@ -1,6 +1,5 @@
 package dev.phucngu.intelladb.connection;
 
-import dev.phucngu.intelladb.schema.IdentifierQuoting;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -91,12 +90,12 @@ public final class SqlResult {
     }
 
     /** {@code schema.table} (identifiers quoted as needed) when the rows come from one table. */
-    public @Nullable String qualifiedSource() {
+    public @Nullable String qualifiedSource(@NotNull DbDialect dialect) {
         if (sourceTable == null) {
             return null;
         }
-        String table = IdentifierQuoting.quote(sourceTable);
-        return sourceSchema == null ? table : IdentifierQuoting.quote(sourceSchema) + "." + table;
+        String table = dialect.quote(sourceTable);
+        return sourceSchema == null ? table : dialect.quote(sourceSchema) + "." + table;
     }
 
     public boolean isSuccessful() {

@@ -2,8 +2,8 @@ package dev.phucngu.intelladb.ui;
 
 import com.intellij.openapi.application.ApplicationManager;
 import dev.phucngu.intelladb.connection.DbConfig;
+import dev.phucngu.intelladb.connection.DbDialect;
 import dev.phucngu.intelladb.connection.DbSession;
-import dev.phucngu.intelladb.schema.IdentifierQuoting;
 import dev.phucngu.intelladb.schema.TableMeta;
 import org.jetbrains.annotations.NotNull;
 
@@ -18,7 +18,8 @@ public record TableRef(@NotNull DbConfig config, @NotNull String schema, @NotNul
     }
 
     public @NotNull String qualifiedName() {
-        return IdentifierQuoting.quote(schema) + "." + IdentifierQuoting.quote(meta.name);
+        DbDialect dialect = config.dialect();
+        return dialect.quote(schema) + "." + dialect.quote(meta.name);
     }
 
     /** Loads a row preview into the given results panel (async). */
@@ -28,7 +29,7 @@ public record TableRef(@NotNull DbConfig config, @NotNull String schema, @NotNul
             panel.showMessage("Not connected. Connect '" + config.name + "' first.");
             return;
         }
-        String sql = "SELECT * FROM " + qualifiedName() + " LIMIT 200";
+        String sql = config.dialect().limit("SELECT * FROM " + qualifiedName(), 200);
         panel.showRunning();
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             dev.phucngu.intelladb.connection.SqlResult result = session.execute(sql);

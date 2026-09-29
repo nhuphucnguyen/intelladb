@@ -1,6 +1,6 @@
 package dev.phucngu.intelladb.util;
 
-import dev.phucngu.intelladb.schema.IdentifierQuoting;
+import dev.phucngu.intelladb.connection.DbDialect;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -44,8 +44,9 @@ public final class ResultExporter {
     }
 
     public static @NotNull String export(@NotNull Format format, @NotNull List<String> columns,
-                                         @NotNull List<Object[]> rows, @Nullable String table) {
-        return export(format, columns, rows, table, Options.DEFAULT);
+                                         @NotNull List<Object[]> rows, @Nullable String table,
+                                         @NotNull DbDialect dialect) {
+        return export(format, columns, rows, table, Options.DEFAULT, dialect);
     }
 
     /**
@@ -54,7 +55,7 @@ public final class ResultExporter {
      */
     public static @NotNull String export(@NotNull Format format, @NotNull List<String> columns,
                                          @NotNull List<Object[]> rows, @Nullable String table,
-                                         @NotNull Options options) {
+                                         @NotNull Options options, @NotNull DbDialect dialect) {
         if (options.transpose() && supportsTranspose(format)) {
             List<Object[]> transposed = new ArrayList<>(columns.size());
             for (int c = 0; c < columns.size(); c++) {
@@ -80,7 +81,8 @@ public final class ResultExporter {
             case TSV -> delimited(columns, rows, '\t');
             case JSON -> json(columns, rows);
             case SQL_INSERTS -> {
-                String inserts = inserts(columns, rows, table == null || table.isBlank() ? "my_table" : table);
+                String inserts = inserts(columns, rows, table == null || table.isBlank() ? "my_table" : table,
+                        dialect);
                 String ddl = options.ddl();
                 yield ddl == null || ddl.isBlank() ? inserts : ddl.strip() + (ddl.strip().endsWith(";") ? "" : ";")
                         + "\n\n" + inserts;
@@ -166,13 +168,13 @@ public final class ResultExporter {
     }
 
     private static @NotNull String inserts(@NotNull List<String> columns, @NotNull List<Object[]> rows,
-                                           @NotNull String table) {
+                                           @NotNull String table, @NotNull DbDialect dialect) {
         StringBuilder columnList = new StringBuilder();
         for (int c = 0; c < columns.size(); c++) {
             if (c > 0) {
                 columnList.append(", ");
             }
-            columnList.append(IdentifierQuoting.quote(columns.get(c)));
+            columnList.append(dialect.quote(columns.get(c)));
         }
         StringBuilder out = new StringBuilder();
         for (Object[] row : rows) {

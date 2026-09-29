@@ -22,7 +22,8 @@ class DdlGeneratorTest {
         ColumnMeta id = new ColumnMeta("id", "int4", false, "nextval('t_id_seq'::regclass)", 1, true, "");
         ColumnMeta name = new ColumnMeta("name", "text", false, "", 2, false, "customer name");
         TableMeta table = new TableMeta("customers", TableMeta.Kind.TABLE, List.of(id, name), "");
-        String ddl = DdlGenerator.generate(new SchemaCatalog(List.of(new SchemaCatalog.Schema("public", List.of(table)))));
+        String ddl = DdlGenerator.generate(new SchemaCatalog(List.of(new SchemaCatalog.Schema("public", List.of(table)))),
+                new PostgresDialect());
 
         assertTrue(ddl.contains("CREATE TABLE public.customers ("));
         assertTrue(ddl.contains("id int4 NOT NULL DEFAULT nextval('t_id_seq'::regclass) PRIMARY KEY,"));
@@ -35,7 +36,8 @@ class DdlGeneratorTest {
     @Test
     void viewsUseCreateView() {
         TableMeta view = new TableMeta("big_orders", TableMeta.Kind.VIEW, List.of(), "");
-        String ddl = DdlGenerator.generate(new SchemaCatalog(List.of(new SchemaCatalog.Schema("public", List.of(view)))));
+        String ddl = DdlGenerator.generate(new SchemaCatalog(List.of(new SchemaCatalog.Schema("public", List.of(view)))),
+                new PostgresDialect());
         assertTrue(ddl.contains("CREATE VIEW public.big_orders ("));
     }
 

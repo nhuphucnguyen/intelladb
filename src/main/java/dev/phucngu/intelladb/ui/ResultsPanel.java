@@ -18,6 +18,8 @@ import com.intellij.ui.components.JBLabel;
 import com.intellij.util.ui.JBUI;
 import dev.phucngu.intelladb.connection.ConnectionManager;
 import dev.phucngu.intelladb.connection.DbConfig;
+import dev.phucngu.intelladb.connection.DbDialect;
+import dev.phucngu.intelladb.connection.Dialects;
 import dev.phucngu.intelladb.connection.DbSession;
 import dev.phucngu.intelladb.connection.SqlResult;
 import dev.phucngu.intelladb.schema.DdlGenerator;
@@ -294,13 +296,19 @@ public final class ResultsPanel extends JPanel {
         // Quick copy follows the grid: the selected rows if any, else all — as displayed.
         List<Object[]> selected = grid.selectedRowsInViewOrder();
         List<Object[]> rows = selected.isEmpty() ? grid.rowsInViewOrder() : selected;
-        return ResultExporter.export(selectedFormat(), result.columns, rows, insertTarget());
+        return ResultExporter.export(selectedFormat(), result.columns, rows, insertTarget(), dialect());
     }
 
     /** Table for SQL Inserts: from the driver's column metadata, else what the opener told us. */
     private @Nullable String insertTarget() {
-        String fromResult = result == null ? null : result.qualifiedSource();
+        String fromResult = result == null ? null : result.qualifiedSource(dialect());
         return fromResult != null ? fromResult : sourceTable;
+    }
+
+    /** The connection's dialect; the default one for the compact grid without a host. */
+    private @NotNull DbDialect dialect() {
+        DbConfig config = host == null ? null : host.config();
+        return config == null ? Dialects.all().get(0) : config.dialect();
     }
 
     private void openExportDialog() {
@@ -316,7 +324,7 @@ public final class ResultsPanel extends JPanel {
             source = result.sql.strip().replaceAll("\\s+", " ");
         }
         new ExportDataDialog(project, result, grid.rowsInViewOrder(), grid.selectedRowsInViewOrder(),
-                source, target, ddlFor(config)).show();
+                source, target, ddlFor(config), dialect()).show();
     }
 
     /** CREATE TABLE for the result's source table, when the connection's catalog knows it. */
@@ -336,7 +344,7 @@ public final class ResultsPanel extends JPanel {
             for (TableMeta table : schema.tables()) {
                 if (table.name.equals(result.sourceTable)) {
                     return DdlGenerator.generate(new SchemaCatalog(List.of(
-                            new SchemaCatalog.Schema(schema.name(), List.of(table)))));
+                            new SchemaCatalog.Schema(schema.name(), List.of(table)))), config.dialect());
                 }
             }
         }

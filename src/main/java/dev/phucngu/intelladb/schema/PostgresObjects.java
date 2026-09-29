@@ -10,45 +10,31 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * PostgreSQL objects plain JDBC metadata can't see (or only sees one table at a time):
  * constraints, indexes, routines, aggregates, sequences, user types, databases,
  * extensions and roles — each loaded with one catalog query for the whole database.
  */
-final class PostgresObjects {
-
-    /** Per-table objects, keyed by "schema.table". */
-    final Map<String, List<TableMeta.Key>> keys = new HashMap<>();
-    final Map<String, List<TableMeta.ForeignKey>> foreignKeys = new HashMap<>();
-    final Map<String, List<TableMeta.Index>> indexes = new HashMap<>();
-    final Map<String, List<TableMeta.Check>> checks = new HashMap<>();
-    /** Per-schema objects, keyed by schema name. */
-    final Map<String, List<SchemaCatalog.Routine>> routines = new HashMap<>();
-    final Map<String, List<String>> sequences = new HashMap<>();
-    final Map<String, List<SchemaCatalog.ObjectType>> objectTypes = new HashMap<>();
-    final List<String> databases = new ArrayList<>();
-    final List<SchemaCatalog.Extension> extensions = new ArrayList<>();
-    final List<String> roles = new ArrayList<>();
+public final class PostgresObjects implements ObjectsLoader {
 
     /** Every per-schema query is limited to the schemas being introspected (bound as a text[]). */
     private static final String IN_SCHEMAS = "n.nspname = ANY(?)";
 
-    static @NotNull PostgresObjects load(@NotNull Connection connection, @NotNull List<String> schemas)
+    @Override
+    public @NotNull CatalogObjects load(@NotNull Connection connection, @NotNull List<String> schemas)
             throws SQLException {
-        PostgresObjects objects = new PostgresObjects();
+        CatalogObjects objects = new CatalogObjects();
         Array schemaArray = connection.createArrayOf("text", schemas.toArray());
         Query query = sql -> {
             PreparedStatement ps = connection.prepareStatement(sql);
             ps.setArray(1, schemaArray);
             return ps;
         };
-        objects.loadConstraints(query);
-        objects.loadIndexes(query);
-        objects.loadRoutines(query);
+        loadConstraints(objects, query);
+        loadIndexes(objects, query);
+        loadRoutines(objects, query);
         try (PreparedStatement ps = query.prepare("SELECT n.nspname, c.relname FROM pg_class c"
                 + " JOIN pg_namespace n ON n.oid = c.relnamespace"
                 + " WHERE c.relkind = 'S' AND " + IN_SCHEMAS + " ORDER BY 1, 2");
@@ -57,7 +43,7 @@ final class PostgresObjects {
                 objects.sequences.computeIfAbsent(rs.getString(1), k -> new ArrayList<>()).add(rs.getString(2));
             }
         }
-        objects.loadTypes(query);
+        loadTypes(objects, query);
         try (Statement st = connection.createStatement()) {
             try (ResultSet rs = st.executeQuery("SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY 1")) {
                 while (rs.next()) {
@@ -79,7 +65,7 @@ final class PostgresObjects {
         return objects;
     }
 
-    private void loadConstraints(@NotNull Query query) throws SQLException {
+    private static void loadConstraints(@NotNull CatalogObjects out, @NotNull Query query) throws SQLException {
         String columnsOf = "ARRAY(SELECT a.attname::text FROM unnest(%s) WITH ORDINALITY k(n, i)"
                 + " JOIN pg_attribute a ON a.attrelid = %s AND a.attnum = k.n ORDER BY k.i)";
         String sql = "SELECT n.nspname, t.relname, c.conname, c.contype, "
@@ -95,32 +81,32 @@ final class PostgresObjects {
                 String name = rs.getString(3);
                 List<String> columns = strings(rs.getArray(5));
                 switch (rs.getString(4)) {
-                    case "p", "u" -> keys.computeIfAbsent(table, k -> new ArrayList<>())
+                    case "p", "u" -> out.keys.computeIfAbsent(table, k -> new ArrayList<>())
                             .add(new TableMeta.Key(name, columns, "p".equals(rs.getString(4))));
-                    case "f" -> foreignKeys.computeIfAbsent(table, k -> new ArrayList<>())
+                    case "f" -> out.foreignKeys.computeIfAbsent(table, k -> new ArrayList<>())
                             .add(new TableMeta.ForeignKey(name, columns, rs.getString(6), rs.getString(7),
                                     strings(rs.getArray(8))));
-                    default -> checks.computeIfAbsent(table, k -> new ArrayList<>())
+                    default -> out.checks.computeIfAbsent(table, k -> new ArrayList<>())
                             .add(new TableMeta.Check(name, rs.getString(9)));
                 }
             }
         }
     }
 
-    private void loadIndexes(@NotNull Query query) throws SQLException {
+    private static void loadIndexes(@NotNull CatalogObjects out, @NotNull Query query) throws SQLException {
         String sql = "SELECT n.nspname, t.relname, i.relname, x.indisunique,"
                 + " ARRAY(SELECT pg_get_indexdef(x.indexrelid, k, true) FROM generate_series(1, x.indnkeyatts) k)"
                 + " FROM pg_index x JOIN pg_class i ON i.oid = x.indexrelid JOIN pg_class t ON t.oid = x.indrelid"
                 + " JOIN pg_namespace n ON n.oid = t.relnamespace WHERE " + IN_SCHEMAS + " ORDER BY 1, 2, 3";
         try (PreparedStatement ps = query.prepare(sql); ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
-                indexes.computeIfAbsent(rs.getString(1) + "." + rs.getString(2), k -> new ArrayList<>())
+                out.indexes.computeIfAbsent(rs.getString(1) + "." + rs.getString(2), k -> new ArrayList<>())
                         .add(new TableMeta.Index(rs.getString(3), strings(rs.getArray(5)), rs.getBoolean(4)));
             }
         }
     }
 
-    private void loadRoutines(@NotNull Query query) throws SQLException {
+    private static void loadRoutines(@NotNull CatalogObjects out, @NotNull Query query) throws SQLException {
         // Extension members (e.g. pgcrypto's functions) are listed under the extension, not here.
         String sql = "SELECT n.nspname, p.proname, p.prokind, pg_get_function_identity_arguments(p.oid),"
                 + " coalesce(pg_get_function_result(p.oid), '')"
@@ -135,13 +121,13 @@ final class PostgresObjects {
                     case "a" -> SchemaCatalog.Routine.Kind.AGGREGATE;
                     default -> SchemaCatalog.Routine.Kind.FUNCTION;
                 };
-                routines.computeIfAbsent(rs.getString(1), k -> new ArrayList<>())
+                out.routines.computeIfAbsent(rs.getString(1), k -> new ArrayList<>())
                         .add(new SchemaCatalog.Routine(rs.getString(2), kind, rs.getString(4), rs.getString(5)));
             }
         }
     }
 
-    private void loadTypes(@NotNull Query query) throws SQLException {
+    private static void loadTypes(@NotNull CatalogObjects out, @NotNull Query query) throws SQLException {
         // Only free-standing types: a table's row type belongs to the table, and a range's
         // multirange is created implicitly with it.
         String sql = "SELECT n.nspname, t.typname, t.typtype FROM pg_type t"
@@ -158,7 +144,7 @@ final class PostgresObjects {
                     case "r" -> "range";
                     default -> "composite";
                 };
-                objectTypes.computeIfAbsent(rs.getString(1), k -> new ArrayList<>())
+                out.objectTypes.computeIfAbsent(rs.getString(1), k -> new ArrayList<>())
                         .add(new SchemaCatalog.ObjectType(rs.getString(2), kind));
             }
         }

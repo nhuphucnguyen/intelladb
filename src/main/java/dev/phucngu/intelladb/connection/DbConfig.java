@@ -26,7 +26,7 @@ public class DbConfig {
     /** "No auth": connect without user and password (trust/peer authentication). */
     public boolean noAuth = false;
     public boolean sslMode = false;
-    /** pgjdbc sslmode when SSL is on: disable, allow, prefer, require, verify-ca, verify-full. */
+    /** Dialect-specific mode name when SSL is on (see {@link DbDialect#sslModes()}). */
     public String sslModeName = "require";
     public String sslRootCert = "";
     public String sslCert = "";
@@ -37,6 +37,10 @@ public class DbConfig {
     public String jdbcUrlOverride = "";
 
     // Options
+    /**
+     * Read-only session. PostgreSQL refuses writes and DDL; MySQL (verified against 8.0) refuses
+     * DML, DDL and TRUNCATE alike. Like any session setting, the user can switch it off again with SQL.
+     */
     public boolean readOnly = false;
     /** Initial transaction mode of new consoles: auto-commit, or manual commit/rollback. */
     public boolean autoCommit = true;
@@ -66,7 +70,7 @@ public class DbConfig {
         if (urlOnly || !jdbcUrlOverride.isBlank()) {
             return name;
         }
-        return host + ":" + port + "/" + database;
+        return database.isEmpty() ? host + ":" + port : host + ":" + port + "/" + database;
     }
 
     public @NotNull DbConfig copy() {

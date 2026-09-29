@@ -48,7 +48,9 @@ final class ResultGrid extends JBTable {
     private static final int MAX_COLUMN_WIDTH = 360;
     private static final Set<String> NUMERIC_TYPES = Set.of(
             "int2", "int4", "int8", "smallint", "integer", "bigint", "serial", "bigserial", "smallserial",
-            "numeric", "decimal", "float4", "float8", "real", "double precision", "money", "oid");
+            "numeric", "decimal", "float4", "float8", "real", "double precision", "money", "oid",
+            // MySQL / MariaDB (bit is deliberately absent: it is a bit string)
+            "tinyint", "mediumint", "int", "float", "double", "dec", "fixed");
 
     private static final int CELL_PADDING = 6;
     private static final int BADGE_MARGIN = 3;
@@ -249,9 +251,14 @@ final class ResultGrid extends JBTable {
         rowHeader.setRowHeight(getRowHeight());
     }
 
+    /** "DECIMAL(10,2) UNSIGNED ZEROFILL" → "decimal": lower-case, without precision and modifiers. */
+    static @NotNull String baseTypeName(@NotNull String type) {
+        String name = type.toLowerCase().replaceAll("\\(.*?\\)", "").replace(" unsigned", "").replace(" zerofill", "");
+        return name.strip();
+    }
+
     private boolean isNumericColumn(int modelColumn) {
-        String type = model.type(modelColumn).toLowerCase();
-        if (NUMERIC_TYPES.contains(type)) {
+        if (NUMERIC_TYPES.contains(baseTypeName(model.type(modelColumn)))) {
             return true;
         }
         for (int r = 0; r < Math.min(20, model.getRowCount()); r++) {

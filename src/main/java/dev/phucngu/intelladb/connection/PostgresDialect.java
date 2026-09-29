@@ -1,9 +1,13 @@
 package dev.phucngu.intelladb.connection;
 
+import dev.phucngu.intelladb.schema.ObjectsLoader;
+import dev.phucngu.intelladb.schema.PostgresObjects;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
@@ -14,6 +18,12 @@ import java.util.Set;
 public final class PostgresDialect implements DbDialect {
 
     public static final String ID = "postgres";
+
+    private static final List<String> SSL_MODES =
+            List.of("require", "verify-ca", "verify-full", "prefer", "allow", "disable");
+
+    private final PostgresObjects objects = new PostgresObjects();
+    private volatile org.postgresql.Driver driver;
 
     @Override
     public @NotNull String id() {
@@ -90,11 +100,72 @@ public final class PostgresDialect implements DbDialect {
     }
 
     @Override
-    public void loadDriver() throws java.sql.SQLException {
+    public boolean isSystemSchema(@NotNull String name) {
+        String lower = name.toLowerCase();
+        return systemSchemas().contains(lower) || lower.startsWith("pg_temp") || lower.startsWith("pg_toast_temp");
+    }
+
+    @Override
+    public @NotNull java.sql.Driver driver() {
+        org.postgresql.Driver d = driver;
+        if (d == null) {
+            driver = d = new org.postgresql.Driver();
+        }
+        return d;
+    }
+
+    @Override
+    public @Nullable ObjectsLoader objectsLoader() {
+        return objects;
+    }
+
+    @Override
+    public @Nullable String useNamespaceStatement(@NotNull String namespace) {
+        return "SET search_path TO " + quote(namespace);
+    }
+
+    @Override
+    public @Nullable String defaultSchema() {
+        return "public";
+    }
+
+    @Override
+    public @NotNull List<String> sslModes() {
+        return SSL_MODES;
+    }
+
+    @Override
+    public @Nullable Object displayValue(@Nullable Object value) {
+        return value instanceof org.postgresql.util.PGobject pg ? pg.getValue() : value;
+    }
+
+    /** pgjdbc reports the origin of plain column references, so a join or expression yields null. */
+    @Override
+    public String @Nullable [] sourceTable(@NotNull ResultSetMetaData meta, int columnCount) {
         try {
-            Class.forName("org.postgresql.Driver");
-        } catch (ClassNotFoundException e) {
-            throw new java.sql.SQLException("PostgreSQL JDBC driver not found", e);
+            if (columnCount == 0 || !meta.isWrapperFor(org.postgresql.PGResultSetMetaData.class)) {
+                return null;
+            }
+            var pg = meta.unwrap(org.postgresql.PGResultSetMetaData.class);
+            String schema = null;
+            String table = null;
+            for (int i = 1; i <= columnCount; i++) {
+                String columnTable = pg.getBaseTableName(i);
+                String columnSchema = pg.getBaseSchemaName(i);
+                if (columnTable == null || columnTable.isEmpty()) {
+                    return null; // computed column
+                }
+                if (table == null) {
+                    table = columnTable;
+                    schema = columnSchema == null || columnSchema.isEmpty() ? null : columnSchema;
+                } else if (!table.equals(columnTable) || !java.util.Objects.equals(schema,
+                        columnSchema == null || columnSchema.isEmpty() ? null : columnSchema)) {
+                    return null; // join
+                }
+            }
+            return new String[]{schema, table};
+        } catch (SQLException e) {
+            return null;
         }
     }
 }

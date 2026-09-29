@@ -6,7 +6,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
@@ -90,10 +89,8 @@ public final class DbSession implements AutoCloseable {
     public static @NotNull Connection open(@NotNull DbConfig config, @Nullable String password, int timeoutSeconds)
             throws SQLException {
         DbDialect dialect = config.dialect();
-        dialect.loadDriver();
         Properties props = new Properties();
-        props.setProperty("loginTimeout", String.valueOf(timeoutSeconds));
-        props.setProperty("connectTimeout", String.valueOf(timeoutSeconds));
+        props.putAll(dialect.timeoutProperties(timeoutSeconds));
         props.putAll(dialect.connectionProperties(config));
         if (!config.noAuth) {
             if (!config.user.isBlank()) {
@@ -108,17 +105,28 @@ public final class DbSession implements AutoCloseable {
                 props.setProperty(key.trim(), value);
             }
         });
-        Connection connection = DriverManager.getConnection(dialect.jdbcUrl(config), props);
+        String url = dialect.connectUrl(dialect.jdbcUrl(config));
+        Connection connection = dialect.driver().connect(url, props);
+        if (connection == null) {
+            // Driver.connect returns null (instead of throwing) for a URL it doesn't handle.
+            throw new SQLException(dialect.displayName() + " driver does not accept URL " + url);
+        }
         try {
             if (config.readOnly) {
                 connection.setReadOnly(true);
+                String readOnly = dialect.readOnlyStatement();
+                if (readOnly != null) {
+                    try (Statement st = connection.createStatement()) {
+                        st.execute(readOnly);
+                    }
+                }
             }
             String timeZone = config.timeZone.isBlank() ? null : dialect.timeZoneStatement(config.timeZone.trim());
             try (Statement st = connection.createStatement()) {
                 if (timeZone != null) {
                     st.execute(timeZone);
                 }
-                for (String sql : dev.phucngu.intelladb.util.SqlSplitter.split(config.startupScript)) {
+                for (String sql : dev.phucngu.intelladb.util.SqlSplitter.split(config.startupScript, dialect.splitterOptions())) {
                     try {
                         st.execute(sql);
                     } catch (SQLException e) {
@@ -174,7 +182,7 @@ public final class DbSession implements AutoCloseable {
                 long duration = System.currentTimeMillis() - start;
                 if (hasResultSet) {
                     try (ResultSet rs = st.getResultSet()) {
-                        return materialize(sql, rs, duration);
+                        return materialize(sql, rs, duration, dialect);
                     }
                 }
                 long count = st.getLargeUpdateCount();
@@ -245,7 +253,7 @@ public final class DbSession implements AutoCloseable {
     }
 
     private static @NotNull SqlResult materialize(@NotNull String sql, @NotNull ResultSet rs,
-                                                  long duration) throws SQLException {
+                                                  long duration, @NotNull DbDialect dialect) throws SQLException {
         ResultSetMetaData meta = rs.getMetaData();
         int columnCount = meta.getColumnCount();
         List<String> columns = new ArrayList<>(columnCount);
@@ -267,48 +275,16 @@ public final class DbSession implements AutoCloseable {
                 Object value = rs.getObject(i);
                 row[i - 1] = switch (value) {
                     case byte[] bytes -> "<binary " + bytes.length + "B>";
-                    case org.postgresql.util.PGobject pg -> pg.getValue();
                     case null -> null;
-                    default -> value;
+                    default -> dialect.displayValue(value);
                 };
             }
             rows.add(row);
         }
-        String[] source = singleSourceTable(meta, columnCount);
-        return SqlResult.rows(sql, columns, types, rows, truncated, duration, source[0], source[1]);
-    }
-
-    /**
-     * {schema, table} when every column maps to the same base table (pgjdbc reports the
-     * origin of plain column references), else {null, null}.
-     */
-    private static @NotNull String[] singleSourceTable(@NotNull ResultSetMetaData meta, int columnCount) {
-        String[] none = {null, null};
-        try {
-            if (columnCount == 0 || !meta.isWrapperFor(org.postgresql.PGResultSetMetaData.class)) {
-                return none;
-            }
-            var pg = meta.unwrap(org.postgresql.PGResultSetMetaData.class);
-            String schema = null;
-            String table = null;
-            for (int i = 1; i <= columnCount; i++) {
-                String columnTable = pg.getBaseTableName(i);
-                String columnSchema = pg.getBaseSchemaName(i);
-                if (columnTable == null || columnTable.isEmpty()) {
-                    return none; // computed column
-                }
-                if (table == null) {
-                    table = columnTable;
-                    schema = columnSchema == null || columnSchema.isEmpty() ? null : columnSchema;
-                } else if (!table.equals(columnTable) || !java.util.Objects.equals(schema,
-                        columnSchema == null || columnSchema.isEmpty() ? null : columnSchema)) {
-                    return none; // join
-                }
-            }
-            return new String[]{schema, table};
-        } catch (SQLException e) {
-            return none;
-        }
+        String[] source = dialect.sourceTable(meta, columnCount);
+        return source == null
+                ? SqlResult.rows(sql, columns, types, rows, truncated, duration)
+                : SqlResult.rows(sql, columns, types, rows, truncated, duration, source[0], source[1]);
     }
 
     /** Reloads the schema catalog in the background of the caller's thread. */

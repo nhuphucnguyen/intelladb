@@ -34,6 +34,7 @@ import com.intellij.ui.components.JBRadioButton;
 import com.intellij.ui.components.JBTextArea;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
+import dev.phucngu.intelladb.connection.DbDialect;
 import dev.phucngu.intelladb.connection.SqlResult;
 import dev.phucngu.intelladb.sql.IntellaSqlFileType;
 import dev.phucngu.intelladb.util.ResultExporter;
@@ -73,6 +74,7 @@ final class ExportDataDialog extends DialogWrapper {
     private final List<Object[]> allRows;
     private final List<Object[]> selectedRows;
     private final @Nullable String insertTarget;
+    private final DbDialect dialect;
     private final @Nullable String ddl;
     private final String baseFileName;
 
@@ -90,16 +92,19 @@ final class ExportDataDialog extends DialogWrapper {
      * @param source       what the rows come from, shown read-only ({@code db.schema.table} or the query)
      * @param insertTarget table name used by SQL Inserts; null falls back to a placeholder
      * @param ddl          CREATE statement for "Add table definition", or null when unknown
+     * @param dialect      quotes the column names of SQL Inserts
      */
     ExportDataDialog(@NotNull Project project, @NotNull SqlResult result,
                      @NotNull List<Object[]> allRows, @NotNull List<Object[]> selectedRows,
-                     @NotNull String source, @Nullable String insertTarget, @Nullable String ddl) {
+                     @NotNull String source, @Nullable String insertTarget, @Nullable String ddl,
+                     @NotNull DbDialect dialect) {
         super(project, true);
         this.project = project;
         this.result = result;
         this.allRows = allRows;
         this.selectedRows = selectedRows;
         this.insertTarget = insertTarget;
+        this.dialect = dialect;
         this.ddl = ddl;
         this.baseFileName = fileNameFor(source, insertTarget);
         this.preview = (EditorEx) EditorFactory.getInstance().createViewer(previewDocument, project);
@@ -253,7 +258,7 @@ final class ExportDataDialog extends DialogWrapper {
     }
 
     private @NotNull String render(@NotNull List<Object[]> rows) {
-        String text = ResultExporter.export(format(), result.columns, rows, insertTarget, options());
+        String text = ResultExporter.export(format(), result.columns, rows, insertTarget, options(), dialect);
         return StringUtil.convertLineSeparators(text); // documents only accept \n
     }
 

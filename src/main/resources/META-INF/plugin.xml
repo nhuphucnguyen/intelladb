@@ -3,7 +3,7 @@
     <name>Intella DB</name>
     <vendor>community</vendor>
     <description><![CDATA[
-    A lightweight database client for <b>IntelliJ IDEA Community</b>: manage PostgreSQL connections,
+    A lightweight database client for <b>IntelliJ IDEA Community</b>: manage PostgreSQL and MySQL connections,
     browse schemas/tables/columns, preview table data, run SQL in a console with a results grid,
     and ask an AI assistant about your database in natural language (NL → SQL).
     <br><br>

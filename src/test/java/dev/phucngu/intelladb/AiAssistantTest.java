@@ -2,6 +2,8 @@ package dev.phucngu.intelladb;
 
 import dev.phucngu.intelladb.ai.AiAssistant;
 import dev.phucngu.intelladb.ai.ChatMessage;
+import dev.phucngu.intelladb.connection.MySqlDialect;
+import dev.phucngu.intelladb.connection.PostgresDialect;
 import dev.phucngu.intelladb.connection.SqlResult;
 import org.junit.jupiter.api.Test;
 
@@ -9,6 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -28,14 +31,28 @@ class AiAssistantTest {
     }
 
     @Test
+    void extractsMySqlFences() {
+        assertEquals("SELECT 1", AiAssistant.firstSqlBlock("```mysql\nSELECT 1\n```"));
+        assertEquals("SELECT 2", AiAssistant.firstSqlBlock("```MariaDB\nSELECT 2\n```"));
+    }
+
+    @Test
+    void systemPromptNamesTheDialect() {
+        String prompt = AiAssistant.systemPrompt(null, true, new MySqlDialect()).content();
+        assertTrue(prompt.contains("- Write SQL for MySQL."));
+        assertFalse(prompt.contains("PostgreSQL"));
+    }
+
+    @Test
     void noSqlBlock() {
         assertNull(AiAssistant.firstSqlBlock("The customers table stores customer data."));
     }
 
     @Test
     void systemPromptContainsDdl() {
-        String prompt = AiAssistant.systemPrompt(null, true).content();
+        String prompt = AiAssistant.systemPrompt(null, true, new PostgresDialect()).content();
         assertTrue(prompt.contains("Intella DB"));
+        assertTrue(prompt.contains("- Write SQL for PostgreSQL."));
     }
 
     @Test

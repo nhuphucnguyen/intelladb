@@ -23,6 +23,9 @@ repositories {
 dependencies {
     // Bundled into the plugin ZIP so users need no driver install.
     implementation("org.postgresql:postgresql:42.7.4")
+    // MySQL is reached with MariaDB Connector/J (LGPL-2.1), which speaks the MySQL protocol;
+    // MySQL's own Connector/J is GPL and cannot be bundled into this plugin.
+    implementation("org.mariadb.jdbc:mariadb-java-client:3.5.10")
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

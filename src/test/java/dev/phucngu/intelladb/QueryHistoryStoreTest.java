@@ -1,6 +1,7 @@
 package dev.phucngu.intelladb;
 
 import dev.phucngu.intelladb.connection.DbConfig;
+import dev.phucngu.intelladb.connection.PostgresDialect;
 import dev.phucngu.intelladb.connection.SqlResult;
 import dev.phucngu.intelladb.history.QueryHistory;
 import dev.phucngu.intelladb.history.QueryHistoryStore;
@@ -56,7 +57,7 @@ class QueryHistoryStoreTest {
         assertEquals("public", select.schema());
         SqlResult result = select.result();
         assertEquals(List.of("int8", "text", "bool", "timestamp"), result.columnTypes);
-        assertEquals("public.t", result.qualifiedSource());
+        assertEquals("public.t", result.qualifiedSource(new PostgresDialect()));
         assertTrue(result.truncated);
         assertArrayEquals(new Object[]{new BigDecimal("42"), "a", true, "2026-09-28 10:00:00.0"}, result.rows.get(0));
         assertArrayEquals(new Object[]{new BigDecimal("100.000000"), null, false, null}, result.rows.get(1));

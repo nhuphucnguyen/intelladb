@@ -46,7 +46,7 @@ public final class InsertStatements {
     private static final int T_WORD = 0;
     private static final int T_NUMBER = 1;
     private static final int T_STRING = 2;
-    private static final int T_QUOTED = 3;   // "quoted identifier"
+    private static final int T_QUOTED = 3;   // "quoted identifier" or `quoted identifier`
     private static final int T_PUNCT = 4;    // ( ) , ; . and operators
     private static final int T_OTHER = 5;
 
@@ -309,9 +309,9 @@ public final class InsertStatements {
                 i = Math.min(j, n);
                 continue;
             }
-            if (c == '"') {
+            if (c == '"' || c == '`') {
                 int j = i + 1;
-                while (j < n && text.charAt(j) != '"') {
+                while (j < n && text.charAt(j) != c) {
                     j++;
                 }
                 tokens.add(new Tok(T_QUOTED, i, Math.min(j + 1, n)));

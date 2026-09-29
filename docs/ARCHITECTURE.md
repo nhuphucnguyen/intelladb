@@ -25,8 +25,8 @@ with four layers. Everything runs inside one tool window, **DB Explorer**.
 `DbConfig` is an XML-serializable POJO stored by the `ConnectionManager` project service
 (`PersistentStateComponent`, `intella-db.xml`); passwords never touch that file — they go to
 `PasswordSafe` under service name "Intella DB", or stay in an in-memory map for
-save-password-off configs. `DbDialect` abstracts URL building, driver loading and the
-system-schema list; `PostgresDialect` is the first implementation. `DbSession` wraps a single
+save-password-off configs. `DbDialect` is the seam for everything database-specific (see
+"Dialects" below); `PostgresDialect` and `MySqlDialect` implement it. `DbSession` wraps a single
 `Connection` (monitor-serialized), materializes `Statement.execute` outcomes into `SqlResult`
 (rows capped at 1000 / update count / message / error).
 
@@ -35,7 +35,8 @@ system-schema list; `PostgresDialect` is the first implementation. `DbSession` w
 records. Because it only uses `DatabaseMetaData`, any JDBC database is supportable.
 `DdlGenerator` renders the catalog as CREATE TABLE statements — used both for Copy DDL and
 as the AI prompt context. `SqlSplitter` splits scripts on top-level semicolons while
-respecting `''`, `""`, `--`, `/* */` and `$tag$` dollar-quoting (unit-tested).
+respecting `''`, `""`, `--`, `/* */` and, per the dialect's `SqlSplitter.Options`, `$tag$`
+dollar-quoting (PostgreSQL) or backticks, `#` comments and backslash escapes (MySQL); unit-tested.
 
 **`ai/`** — deliberately thin and provider-agnostic. `AiSettings` (application service,
 `intella-db-ai.xml`) stores preset id/base URL/model/temperature/max tokens — never the key;
@@ -69,11 +70,42 @@ land while the dialog is open.
 - **Modality:** EDT callbacks that must land during a modal dialog need an explicit
   `ModalityState` — the default queues until the dialog closes (this was a real bug).
 - **JDBC drivers in plugins:** `DriverManager` service discovery cannot see plugin-bundled
-  drivers, so the dialect loads `org.postgresql.Driver` explicitly before connecting.
+  drivers, so `DbSession.open` connects with `dialect.driver().connect(url, props)`, and
+  treats a null result (URL not accepted) as an error.
+
+## Dialects
+
+Everything that differs between database products sits on `DbDialect`; the defaults are
+the PostgreSQL/ANSI behaviour, so a new dialect only overrides what differs:
+
+- **URL and connect:** `jdbcUrl` (what the user sees), `connectUrl` (rewrite for the
+  driver, e.g. `jdbc:mysql:` → `jdbc:mariadb:`), `connectionProperties` (SSL, auth),
+  `timeoutProperties` (drivers disagree on units), `driver()`, `sslModes()`,
+  `readOnlyStatement()`, `timeZoneStatement()`, `listDatabases()`.
+- **Namespace model:** `namespaces()` is `DATABASES_AND_SCHEMAS` (PostgreSQL: connection →
+  database → schema) or `SCHEMAS_ONLY` (MySQL: a JDBC catalog *is* the schema shown under
+  the connection, as in IntelliJ). `MetadataLoader` walks `getCatalogs()` instead of
+  `getSchemas()` for the latter and passes the name as the catalog argument.
+- **Extra metadata:** `objectsLoader()` returns an optional `ObjectsLoader`
+  (`PostgresObjects`, `MySqlObjects`) that fills a dialect-neutral `CatalogObjects` with
+  what JDBC metadata misses — keys, foreign keys, indexes, checks, routines, and for
+  PostgreSQL sequences, types, extensions. `null` means plain JDBC only.
+- **SQL syntax:** `quote`, `limit`, `useNamespaceStatement`, `defaultSchema`,
+  `isSystemSchema`, and `splitterOptions()` (`SqlSplitter.Options`: dollar quotes,
+  backticks, `#` comments, backslash escapes).
+- **Driver-specific values:** `displayValue` (PGobject) and `sourceTable` (which single
+  table a result set came from, when the driver reports it).
+
+Only files named `Postgres*.java` / `MySql*.java` may reference `org.postgresql` /
+`org.mariadb` (enforced by `DriverImportGuardTest`). Bundled drivers: pgjdbc
+(BSD-2-Clause) and MariaDB Connector/J (LGPL-2.1, chosen for MySQL because MySQL's own
+Connector/J is GPL).
 
 ## Testing
 
-Pure-JVM JUnit tests cover `SqlSplitter`, `DdlGenerator`/`IdentifierQuoting`, prompt building
+`MetadataLoaderPostgresTest` and `MetadataLoaderMySqlTest` run against real local servers
+(see their javadoc for the environment variables) and are skipped when none is reachable.
+Pure-JVM JUnit tests cover `SqlSplitter`, `DdlGenerator`/`IdentifierQuoting`, the dialects, prompt building
 and SQL-block extraction, and the full `OpenAiCompatibleClient` wire format against a
 JDK-built-in `HttpServer` (URL path, Bearer header, JSON body, HTTP-error/parse-error paths).
 UI behavior is verified by driving `runIde` with computer use (see ROADMAP M8).

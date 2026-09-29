@@ -68,7 +68,6 @@ public final class ConnectionDialog extends DialogWrapper {
 
     private static final String[] SAVE_MODES = {"Forever", "Until restart", "Never"};
     private static final String[] AUTH_MODES = {"User & Password", "No auth"};
-    private static final String[] SSL_MODES = {"require", "verify-ca", "verify-full", "prefer", "allow", "disable"};
 
     private final Project project;
     private final ConnectionManager manager;
@@ -113,7 +112,7 @@ public final class ConnectionDialog extends DialogWrapper {
 
     // SSL
     private final JBCheckBox useSsl = new JBCheckBox("Use SSL");
-    private final ComboBox<String> sslModeCombo = new ComboBox<>(SSL_MODES);
+    private final ComboBox<String> sslModeCombo = new ComboBox<>();
     private final TextFieldWithBrowseButton caFile = new TextFieldWithBrowseButton();
     private final TextFieldWithBrowseButton certFile = new TextFieldWithBrowseButton();
     private final TextFieldWithBrowseButton keyFile = new TextFieldWithBrowseButton();
@@ -340,7 +339,7 @@ public final class ConnectionDialog extends DialogWrapper {
         startupScript.setText(config.startupScript);
 
         useSsl.setSelected(config.sslMode);
-        sslModeCombo.setSelectedItem(config.sslModeName.isBlank() ? "require" : config.sslModeName);
+        fillSslModes(config.sslModeName);
         caFile.setText(config.sslRootCert);
         certFile.setText(config.sslCert);
         keyFile.setText(config.sslKey);
@@ -447,6 +446,7 @@ public final class ConnectionDialog extends DialogWrapper {
     private void wireListeners() {
         dialectCombo.addActionListener(e -> {
             portSpinner.setNumber(selectedDialect().defaultPort());
+            fillSslModes(String.valueOf(sslModeCombo.getSelectedItem()));
             fieldsChanged();
         });
         defaultType.addActionListener(e -> {
@@ -504,6 +504,13 @@ public final class ConnectionDialog extends DialogWrapper {
         if (!nameEdited) {
             updateAutoName();
         }
+    }
+
+    /** Fills the SSL mode dropdown from the selected dialect, keeping {@code keep} when it is offered. */
+    private void fillSslModes(@Nullable String keep) {
+        List<String> modes = selectedDialect().sslModes();
+        sslModeCombo.setModel(new DefaultComboBoxModel<>(modes.toArray(String[]::new)));
+        sslModeCombo.setSelectedItem(keep != null && modes.contains(keep) ? keep : modes.get(0));
     }
 
     /** Host, port or database changed: regenerate the URL (dropping a typed override) and the name. */
@@ -600,13 +607,11 @@ public final class ConnectionDialog extends DialogWrapper {
         DbConfig probe = snapshot();
         Set<String> checked = new HashSet<>(checkedSchemas());
         schemaStatus.setText("Loading schemas…");
-        withProbe(probe, MetadataLoader::schemaNames, names -> {
-            Set<String> system = probe.dialect().systemSchemas();
+        withProbe(probe, connection -> MetadataLoader.schemaNames(connection, probe.dialect()), names -> {
             schemaList.clear();
             for (String name : names) {
-                boolean isSystem = system.contains(name.toLowerCase()) || name.toLowerCase().startsWith("pg_temp")
-                        || name.toLowerCase().startsWith("pg_toast_temp");
-                if (isSystem && !showSystemSchemas.isSelected()) {
+                boolean isSystem = probe.dialect().isSystemSchema(name);
+                if (isSystem && !showSystemSchemas.isSelected() && !checked.contains(name)) {
                     continue;
                 }
                 boolean selected = checked.isEmpty() ? !isSystem : checked.contains(name);

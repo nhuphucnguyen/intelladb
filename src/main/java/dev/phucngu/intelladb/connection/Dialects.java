@@ -10,7 +10,7 @@ import java.util.stream.Collectors;
 /** Registry of supported dialects. */
 public final class Dialects {
 
-    private static final List<DbDialect> ALL = List.of(new PostgresDialect());
+    private static final List<DbDialect> ALL = List.of(new PostgresDialect(), new MySqlDialect());
     private static final Map<String, DbDialect> BY_ID =
             ALL.stream().collect(Collectors.toUnmodifiableMap(DbDialect::id, Function.identity()));
 

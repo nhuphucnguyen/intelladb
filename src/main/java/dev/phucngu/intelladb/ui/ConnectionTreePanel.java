@@ -28,7 +28,9 @@ import com.intellij.util.ui.UIUtil;
 import dev.phucngu.intelladb.IntellaDbIcons;
 import dev.phucngu.intelladb.connection.ConnectionManager;
 import dev.phucngu.intelladb.connection.DbConfig;
+import dev.phucngu.intelladb.connection.DbDialect;
 import dev.phucngu.intelladb.connection.DbSession;
+import dev.phucngu.intelladb.connection.NamespaceModel;
 import dev.phucngu.intelladb.schema.DdlGenerator;
 import dev.phucngu.intelladb.schema.SchemaCatalog;
 import dev.phucngu.intelladb.schema.TableMeta;
@@ -199,14 +201,18 @@ public final class ConnectionTreePanel implements Disposable {
      * connection → database → schema → folders ("tables 15", "views 4", "routines 9"…) →
      * objects → per-table folders (columns, keys, foreign keys, indexes, checks), plus the
      * "Database Objects" and "Server Objects" groups — the layout of IntelliJ's database tools.
-     * Empty folders are left out.
+     * Where a database is just a schema (MySQL) there is no database node: the schemas hang
+     * off the connection, which carries the "shown of total" badge. Empty folders are left out.
      */
     private void appendCatalog(@NotNull DefaultMutableTreeNode configNode, @NotNull DbConfig config,
                                @NotNull SchemaCatalog catalog) {
+        boolean schemasOnly = config.dialect().namespaces() == NamespaceModel.SCHEMAS_ONLY;
         String database = catalog.database().isEmpty() ? config.database : catalog.database();
-        DefaultMutableTreeNode databaseNode = new DefaultMutableTreeNode(new DatabaseEntry(
-                config, database, catalog.schemas().size(), catalog.totalSchemas()));
-        configNode.add(databaseNode);
+        DefaultMutableTreeNode databaseNode = schemasOnly ? configNode : new DefaultMutableTreeNode(
+                new DatabaseEntry(config, database, catalog.schemas().size(), catalog.totalSchemas()));
+        if (!schemasOnly) {
+            configNode.add(databaseNode);
+        }
         for (SchemaCatalog.Schema schema : catalog.schemas()) {
             DefaultMutableTreeNode schemaNode = new DefaultMutableTreeNode(new SchemaEntry(config, schema.name()));
             databaseNode.add(schemaNode);
@@ -229,7 +235,7 @@ public final class ConnectionTreePanel implements Disposable {
                     .map(t -> new ObjectEntry(config, ObjectKind.OBJECT_TYPE, t.name(), t.kind()))
                     .toList());
         }
-        if (!catalog.extensions().isEmpty()) {
+        if (!schemasOnly && !catalog.extensions().isEmpty()) {
             DefaultMutableTreeNode group = folderNode(config, Folder.DATABASE_OBJECTS, database, 0);
             databaseNode.add(group);
             appendObjects(group, config, Folder.EXTENSIONS, database, catalog.extensions().stream()
@@ -430,9 +436,12 @@ public final class ConnectionTreePanel implements Disposable {
             DefaultMutableTreeNode configNode = (DefaultMutableTreeNode) root.getChildAt(i);
             if (configNode.getUserObject() instanceof ConfigEntry c && c.config().id.equals(config.id)
                     && configNode.getChildCount() > 0
-                    && configNode.getFirstChild() instanceof DefaultMutableTreeNode databaseNode
-                    && databaseNode.getUserObject() instanceof DatabaseEntry) {
-                tree.expandPath(new TreePath(databaseNode.getPath()));
+                    && configNode.getFirstChild() instanceof DefaultMutableTreeNode databaseNode) {
+                if (databaseNode.getUserObject() instanceof DatabaseEntry) {
+                    tree.expandPath(new TreePath(databaseNode.getPath()));
+                } else if (config.dialect().namespaces() == NamespaceModel.SCHEMAS_ONLY) {
+                    tree.expandPath(new TreePath(configNode.getPath())); // the schemas are right here
+                }
             }
         }
     }
@@ -553,8 +562,8 @@ public final class ConnectionTreePanel implements Disposable {
         }
     }
 
-    private void copyDdl(@NotNull SchemaCatalog catalog, @NotNull String what) {
-        CopyPasteManager.getInstance().setContents(new StringSelection(DdlGenerator.generate(catalog)));
+    private void copyDdl(@NotNull SchemaCatalog catalog, @NotNull DbDialect dialect, @NotNull String what) {
+        CopyPasteManager.getInstance().setContents(new StringSelection(DdlGenerator.generate(catalog, dialect)));
         NotificationGroupManager.getInstance().getNotificationGroup("IntellaDB")
                 .createNotification(what + " DDL copied to clipboard", NotificationType.INFORMATION)
                 .notify(project);
@@ -613,7 +622,7 @@ public final class ConnectionTreePanel implements Disposable {
                                     .filter(s -> s.name().equals(schemaEntry.name()))
                                     .findFirst().map(SchemaCatalog.Schema::tables).orElse(List.of());
                             copyDdl(new SchemaCatalog(List.of(
-                                    new SchemaCatalog.Schema(schemaEntry.name(), tables))), "Schema");
+                                    new SchemaCatalog.Schema(schemaEntry.name(), tables))), config.dialect(), "Schema");
                         }
                     }));
         } else if (entry instanceof TableEntry tableEntry) {
@@ -625,7 +634,8 @@ public final class ConnectionTreePanel implements Disposable {
             group.addSeparator();
             group.add(action("Copy Table DDL", "Copy CREATE TABLE statement",
                     com.intellij.icons.AllIcons.Actions.Copy, () -> copyDdl(new SchemaCatalog(List.of(
-                            new SchemaCatalog.Schema(tableEntry.schema(), List.of(tableEntry.meta())))), "Table")));
+                            new SchemaCatalog.Schema(tableEntry.schema(), List.of(tableEntry.meta())))),
+                            tableEntry.config().dialect(), "Table")));
             group.add(action("Ask AI about this table", "Explain this table with the AI assistant",
                     IntellaDbIcons.AI, () -> AiChatPanel.openInExplorer(project,
                             "Explain the table " + tableEntry.schema() + "."
@@ -702,7 +712,11 @@ public final class ConnectionTreePanel implements Disposable {
                     setIcon(connected ? IntellaDbIcons.CONNECTION_CONNECTED : IntellaDbIcons.CONNECTION);
                     DbSession session = manager.session(config.id);
                     SchemaCatalog catalog = session == null ? null : session.catalog();
-                    if (catalog != null && !catalog.databases().isEmpty()) {
+                    if (catalog != null && config.dialect().namespaces() == NamespaceModel.SCHEMAS_ONLY) {
+                        if (catalog.totalSchemas() > 0) {
+                            appendBadge(plain, catalog.schemas().size(), catalog.totalSchemas());
+                        }
+                    } else if (catalog != null && !catalog.databases().isEmpty()) {
                         appendBadge(plain, 1, catalog.databases().size());
                     }
                 }

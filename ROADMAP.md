@@ -15,12 +15,14 @@ Built milestone by milestone, same discipline as the sibling
 | M8 | Visual verification in `runIde` sandbox via computer use (all flows above), bug-fix round: modal-dialog modality, plugin-bundled JDBC driver loading, preset combo labels, connected-state label, AI panel connection fallback | ✅ |
 | M9 | Reasoning-model handling (GLM): empty-answer detection pointing at Max tokens, ping budget 512, default max tokens 2048 — verified against the live Z.ai coding plan | ✅ |
 | M9b | Liquibase: SQL injection into XML `<sql>` blocks + INSERT column↔value caret aid with inline column hints (7 new unit tests) — verified in sandbox | ✅ |
-| M10 | MySQL / SQLite / H2 dialects (interface is ready) | planned |
+| M10 | More dialects: MySQL done (M53); SQLite / H2 remaining | in progress |
 | M11 | Data editing in the grid (inline edit, INSERT/UPDATE generation), CSV export | planned |
 | M12 | AI: streaming responses, "explain this error", index advice, per-table context menus | planned |
 | M13 | Query history, bookmarks, schema compare | planned |
 | M9c | Conversation-style chat with inline results (replaced separate AI—Result tab) | ✅ |
 | M9e | AI Assistant split into its own tool window with a connection switcher; shared SessionOpener for Explorer + chat | ✅ |
+| M52 | Dialect seams: every PostgreSQL assumption moved behind `DbDialect` (namespace model, quoting, LIMIT, schema switching, system schemas, splitter options, `Driver.connect`, value/metadata handling, SSL modes, AI prompt dialect); PostgreSQL behaviour unchanged | ✅ |
+| M53 | MySQL dialect on the bundled MariaDB Connector/J: databases shown as schemas under the connection (like IntelliJ), `MySqlObjects` from information_schema, backtick/`#`/backslash-aware splitter and lexer, integration test against a real server | ✅ |
 
 ## Verification record (M8)
 

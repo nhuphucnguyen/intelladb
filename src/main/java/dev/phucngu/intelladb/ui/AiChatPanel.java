@@ -483,7 +483,7 @@ public final class AiChatPanel extends JPanel implements Disposable {
         String context = shared == null ? "" : String.join("\n", shared);
         String content = AiAssistant.withContext(context, question);
         List<ChatMessage> messages = AiAssistant.conversation(
-                AiAssistant.systemPrompt(session.catalog(), settings.includeSchema()),
+                AiAssistant.systemPrompt(session.catalog(), settings.includeSchema(), session.dialect()),
                 List.copyOf(history), // append-only: keeps the request prefix cacheable
                 content);
         String baseUrl = settings.baseUrl();

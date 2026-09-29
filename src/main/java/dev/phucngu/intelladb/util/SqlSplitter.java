@@ -6,15 +6,36 @@ import org.jetbrains.annotations.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Splits a SQL script into individual statements, respecting '', "", comments and dollar-quotes. */
+/**
+ * Splits a SQL script into individual statements, respecting quotes and comments. What
+ * counts as a quote or comment differs per database, hence {@link Options}.
+ */
 public final class SqlSplitter {
+
+    /**
+     * Lexical rules of a SQL dialect that change where a statement ends.
+     *
+     * @param dollarQuotes     {@code $tag$ … $tag$} strings (PostgreSQL)
+     * @param backtickQuotes   backtick-quoted identifiers (MySQL)
+     * @param hashComments     {@code # …} line comments (MySQL; an operator in PostgreSQL)
+     * @param backslashEscapes a backslash escapes the next character in string literals (MySQL default mode)
+     */
+    public record Options(boolean dollarQuotes, boolean backtickQuotes, boolean hashComments,
+                          boolean backslashEscapes) {
+        public static final Options POSTGRES = new Options(true, false, false, false);
+        public static final Options MYSQL = new Options(false, true, true, true);
+    }
 
     /**
      * Splits on top-level semicolons. Trailing semicolon optional per statement; empty
      * (whitespace/comment-only) statements are dropped. Comments are preserved inside statements.
      */
     public static @NotNull List<String> split(@NotNull String script) {
-        return ranges(script).stream().map(Statement::text).toList();
+        return split(script, Options.POSTGRES);
+    }
+
+    public static @NotNull List<String> split(@NotNull String script, @NotNull Options options) {
+        return ranges(script, options).stream().map(Statement::text).toList();
     }
 
     /** One statement of a script: trimmed text plus its [start, end) offsets in the script. */
@@ -26,6 +47,10 @@ public final class SqlSplitter {
 
     /** Like {@link #split} but keeps where each statement sits in the script. */
     public static @NotNull List<Statement> ranges(@NotNull String script) {
+        return ranges(script, Options.POSTGRES);
+    }
+
+    public static @NotNull List<Statement> ranges(@NotNull String script, @NotNull Options options) {
         List<Statement> statements = new ArrayList<>();
         int segmentStart = 0;
         int i = 0;
@@ -33,7 +58,7 @@ public final class SqlSplitter {
         while (i < n) {
             char c = script.charAt(i);
             // Line comments
-            if (c == '-' && i + 1 < n && script.charAt(i + 1) == '-') {
+            if ((c == '-' && i + 1 < n && script.charAt(i + 1) == '-') || (c == '#' && options.hashComments())) {
                 int end = script.indexOf('\n', i);
                 if (end < 0) {
                     end = n;
@@ -49,7 +74,7 @@ public final class SqlSplitter {
                 continue;
             }
             // Dollar-quoted strings ($tag$ ... $tag$)
-            if (c == '$') {
+            if (c == '$' && options.dollarQuotes()) {
                 int close = script.indexOf('$', i + 1);
                 if (close > i && close - i <= 20 && isTagBody(script, i + 1, close)) {
                     String tag = script.substring(i, close + 1);
@@ -60,9 +85,13 @@ public final class SqlSplitter {
                 }
             }
             // Quoted strings and quoted identifiers
-            if (c == '\'' || c == '"') {
+            if (c == '\'' || c == '"' || (c == '`' && options.backtickQuotes())) {
                 int end = i + 1;
                 while (end < n) {
+                    if (c != '`' && options.backslashEscapes() && script.charAt(end) == '\\') {
+                        end += 2; // \' \\ and friends
+                        continue;
+                    }
                     if (script.charAt(end) == c) {
                         if (end + 1 < n && script.charAt(end + 1) == c) {
                             end += 2; // escaped quote ('' or "")
@@ -91,12 +120,16 @@ public final class SqlSplitter {
 
     /** The statement without the whitespace and comments before its first token. */
     public static @NotNull String stripLeadingComments(@NotNull String sql) {
+        return stripLeadingComments(sql, Options.POSTGRES);
+    }
+
+    public static @NotNull String stripLeadingComments(@NotNull String sql, @NotNull Options options) {
         int i = 0;
         int n = sql.length();
         while (i < n) {
             if (Character.isWhitespace(sql.charAt(i))) {
                 i++;
-            } else if (sql.startsWith("--", i)) {
+            } else if (sql.startsWith("--", i) || (options.hashComments() && sql.charAt(i) == '#')) {
                 int end = sql.indexOf('\n', i);
                 i = end < 0 ? n : end + 1;
             } else if (sql.startsWith("/*", i)) {
@@ -127,7 +160,11 @@ public final class SqlSplitter {
      * line below), else the first one after it.
      */
     public static @Nullable Statement at(@NotNull String script, int offset) {
-        List<Statement> all = ranges(script);
+        return at(script, offset, Options.POSTGRES);
+    }
+
+    public static @Nullable Statement at(@NotNull String script, int offset, @NotNull Options options) {
+        List<Statement> all = ranges(script, options);
         Statement before = null;
         for (Statement statement : all) {
             if (statement.contains(offset)) {

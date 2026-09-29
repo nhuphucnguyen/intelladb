@@ -92,4 +92,38 @@ class SqlSplitterTest {
                 SqlSplitter.stripLeadingComments("-- SQL for localhost\n /* note */\n  select * from t -- tail"));
         assertEquals("", SqlSplitter.stripLeadingComments("-- only a comment"));
     }
+
+    @Test
+    void mysqlBacktickIdentifiersMaySpanSemicolons() {
+        List<String> result = SqlSplitter.split("SELECT `a;b` FROM t; SELECT 2;", SqlSplitter.Options.MYSQL);
+        assertEquals(List.of("SELECT `a;b` FROM t", "SELECT 2"), result);
+        // PostgreSQL has no backtick quoting: the same text splits inside the identifier.
+        assertEquals(3, SqlSplitter.split("SELECT `a;b` FROM t; SELECT 2;").size());
+    }
+
+    @Test
+    void mysqlHashStartsALineComment() {
+        List<String> result = SqlSplitter.split("SELECT 1 # not; a split\n; SELECT 2;", SqlSplitter.Options.MYSQL);
+        assertEquals(List.of("SELECT 1 # not; a split", "SELECT 2"), result);
+        assertEquals(3, SqlSplitter.split("SELECT 1 # x; y\n; SELECT 2;").size(), "# is an operator in PostgreSQL");
+    }
+
+    @Test
+    void mysqlBackslashEscapesInStrings() {
+        List<String> result = SqlSplitter.split("SELECT 'it\\'s; fine'; SELECT \"a\\\"b;c\";", SqlSplitter.Options.MYSQL);
+        assertEquals(List.of("SELECT 'it\\'s; fine'", "SELECT \"a\\\"b;c\""), result);
+        // In PostgreSQL the backslash is an ordinary character, so the string ends at the escaped quote.
+        assertEquals(2, SqlSplitter.split("SELECT 'a\\'; SELECT 2").size());
+    }
+
+    @Test
+    void mysqlHasNoDollarQuoting() {
+        List<String> result = SqlSplitter.split("SELECT '$$'; SELECT $$ ; $$", SqlSplitter.Options.MYSQL);
+        assertEquals(List.of("SELECT '$$'", "SELECT $$", "$$"), result);
+    }
+
+    @Test
+    void mysqlStripsHashCommentsBeforeTheStatement() {
+        assertEquals("select 1", SqlSplitter.stripLeadingComments("# note\n select 1", SqlSplitter.Options.MYSQL));
+    }
 }

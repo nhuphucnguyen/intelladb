@@ -28,10 +28,11 @@ import com.intellij.ui.JBColor;
 import com.intellij.util.ui.JBUI;
 import dev.phucngu.intelladb.IntellaDbIcons;
 import dev.phucngu.intelladb.connection.DbConfig;
+import dev.phucngu.intelladb.connection.DbDialect;
 import dev.phucngu.intelladb.connection.DbSession;
+import dev.phucngu.intelladb.connection.NamespaceModel;
 import dev.phucngu.intelladb.connection.SqlResult;
 import dev.phucngu.intelladb.history.QueryHistory;
-import dev.phucngu.intelladb.schema.IdentifierQuoting;
 import dev.phucngu.intelladb.schema.SchemaCatalog;
 import dev.phucngu.intelladb.sql.IntellaSqlFileType;
 import dev.phucngu.intelladb.sql.SqlColumnValueAid;
@@ -64,7 +65,8 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
     static final Key<SqlConsole> KEY = Key.create("intelladb.sqlConsole");
     private static final Key<Boolean> HEADER_INSTALLED = Key.create("intelladb.sqlConsole.header");
     private static final Pattern FROM_TABLE = Pattern.compile(
-            "(?is)^\\s*(?:select|table)\\b.*?\\bfrom\\s+((?:\"[^\"]+\"|[\\w$]+)(?:\\.(?:\"[^\"]+\"|[\\w$]+))?)");
+            "(?is)^\\s*(?:select|table)\\b.*?\\bfrom\\s+((?:\"[^\"]+\"|`[^`]+`|[\\w$]+)"
+                    + "(?:\\.(?:\"[^\"]+\"|`[^`]+`|[\\w$]+))?)");
 
     enum TxMode { AUTO, MANUAL }
 
@@ -271,15 +273,16 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         if (selection.hasSelection()) {
             int base = selection.getSelectionStart();
             List<SqlSplitter.Statement> shifted = new ArrayList<>();
-            for (SqlSplitter.Statement s : SqlSplitter.ranges(text.substring(base, selection.getSelectionEnd()))) {
+            for (SqlSplitter.Statement s : SqlSplitter.ranges(text.substring(base, selection.getSelectionEnd()),
+                    config.dialect().splitterOptions())) {
                 shifted.add(new SqlSplitter.Statement(base + s.start(), base + s.end(), s.text()));
             }
             return shifted;
         }
         if (runMode == RunMode.SCRIPT) {
-            return SqlSplitter.ranges(text);
+            return SqlSplitter.ranges(text, config.dialect().splitterOptions());
         }
-        SqlSplitter.Statement atCaret = SqlSplitter.at(text, editor.getCaretModel().getOffset());
+        SqlSplitter.Statement atCaret = SqlSplitter.at(text, editor.getCaretModel().getOffset(), config.dialect().splitterOptions());
         return atCaret == null ? List.of() : List.of(atCaret);
     }
 
@@ -351,7 +354,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
                     if (into != null) {
                         into.showResult(result);
                     } else if (result.kind == SqlResult.Kind.ROWS) {
-                        String fromDriver = result.qualifiedSource();
+                        String fromDriver = result.qualifiedSource(config.dialect());
                         String table = fromDriver != null ? fromDriver : sourceTable(statement.text());
                         ResultsPanel panel = view.addResult(result,
                                 table != null ? table : "Result " + index, this);
@@ -374,15 +377,20 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
     }
 
     /**
-     * SET search_path to the selected schema before every run. Not cached: the session is
-     * shared between consoles, a reconnect starts from the default, and a ROLLBACK undoes
-     * a SET made inside the transaction — any of which silently put it back on public.
+     * Switches the session to the selected schema before every run (PostgreSQL: SET
+     * search_path, MySQL: USE). Not cached: the session is shared between consoles, a
+     * reconnect starts from the default, and a ROLLBACK undoes a SET made inside the
+     * transaction — any of which silently put it back on the default schema.
      */
     private void applySchema(@NotNull DbSession session, @Nullable String target) throws SQLException {
         if (target == null) {
             return;
         }
-        SqlResult result = session.execute("SET search_path TO " + IdentifierQuoting.quote(target));
+        String statement = config.dialect().useNamespaceStatement(target);
+        if (statement == null) {
+            return;
+        }
+        SqlResult result = session.execute(statement);
         if (!result.isSuccessful()) {
             throw new SQLException(result.text);
         }
@@ -393,7 +401,8 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
      * {@code schema.table} for a simple SELECT … FROM t, else null (tab gets "Result n").
      */
     private @Nullable String sourceTable(@NotNull String sql) {
-        Matcher m = FROM_TABLE.matcher(SqlSplitter.stripLeadingComments(sql));
+        DbDialect dialect = config.dialect();
+        Matcher m = FROM_TABLE.matcher(SqlSplitter.stripLeadingComments(sql, dialect.splitterOptions()));
         if (!m.find()) {
             return null;
         }
@@ -401,8 +410,8 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         if (table.contains(".")) {
             return table;
         }
-        String effectiveSchema = schema != null ? schema : "public";
-        return IdentifierQuoting.quote(effectiveSchema) + "." + table;
+        String effectiveSchema = schema != null ? schema : dialect.defaultSchema();
+        return effectiveSchema == null ? table : dialect.quote(effectiveSchema) + "." + table;
     }
 
     private static void edt(@NotNull Runnable runnable) {
@@ -581,7 +590,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
     private final class SchemaAction extends ComboBoxAction {
         SchemaAction() {
             setSmallVariant(true);
-            getTemplatePresentation().setDescription("Default schema for this console (sets search_path)");
+            getTemplatePresentation().setDescription("Default schema for this console");
         }
 
         @Override
@@ -611,10 +620,16 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
 
         @Override
         public void update(@NotNull AnActionEvent e) {
-            String database = config.database.isBlank() ? config.name : config.database;
+            DbDialect dialect = config.dialect();
+            String fallback = dialect.defaultSchema();
+            if (fallback == null && dialect.namespaces() == NamespaceModel.SCHEMAS_ONLY) {
+                fallback = config.database; // the database from the connection settings is the default
+            }
             String shown = schema != null ? schema
-                    : (schemaNames().contains("public") ? "public" : "<schema>");
-            e.getPresentation().setText(database + "." + shown);
+                    : (fallback != null && schemaNames().contains(fallback) ? fallback : "<schema>");
+            // With catalogs as schemas there is no database level to prefix.
+            e.getPresentation().setText(dialect.namespaces() == NamespaceModel.SCHEMAS_ONLY ? shown
+                    : (config.database.isBlank() ? config.name : config.database) + "." + shown);
             e.getPresentation().setIcon(IntellaDbIcons.SCHEMA);
         }
 

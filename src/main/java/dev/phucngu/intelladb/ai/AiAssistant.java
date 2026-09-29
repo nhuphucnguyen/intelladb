@@ -1,5 +1,6 @@
 package dev.phucngu.intelladb.ai;
 
+import dev.phucngu.intelladb.connection.DbDialect;
 import dev.phucngu.intelladb.connection.SqlResult;
 import dev.phucngu.intelladb.schema.DdlGenerator;
 import dev.phucngu.intelladb.schema.SchemaCatalog;
@@ -18,24 +19,26 @@ import java.util.regex.Pattern;
 public final class AiAssistant {
 
     public static final Pattern SQL_BLOCK = Pattern.compile(
-            "```\\s*(?:sql|postgresql|postgres)?\\s*\\n(.*?)```", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+            "```\\s*(?:sql|postgresql|postgres|mysql|mariadb)?\\s*\\n(.*?)```", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
     /** System prompt establishing the assistant's contract. */
-    public static @NotNull ChatMessage systemPrompt(@Nullable SchemaCatalog catalog, boolean includeSchema) {
+    public static @NotNull ChatMessage systemPrompt(@Nullable SchemaCatalog catalog, boolean includeSchema,
+                                                    @NotNull DbDialect dialect) {
         StringBuilder sb = new StringBuilder();
         sb.append("You are Intella DB, an assistant embedded in an IntelliJ IDEA database tool window. ")
           .append("The user asks questions about their database in natural language.\n")
           .append("Rules:\n")
           .append("- If the answer needs data, give a short explanation and then exactly one SQL query ")
           .append("in a fenced ```sql block. The query must be a single statement, read-only unless the user explicitly asks to modify data.\n")
+          .append("- Write SQL for ").append(dialect.displayName()).append(".\n")
           .append("- Prefer schema-qualified names (schema.table).\n")
           .append("- If the question is conceptual or the answer is already in the schema, reply in plain text without a SQL block.\n")
           .append("- Never invent tables or columns that are not in the schema.\n")
           .append("- When the user runs one of your queries, its result is included at the start of their next ")
           .append("message under \"Query result\" (possibly truncated). Use it to answer; do not ask them to paste it.\n");
         if (catalog != null && includeSchema && !catalog.isEmpty()) {
-            sb.append("\nDatabase schema (PostgreSQL DDL):\n\n")
-              .append(DdlGenerator.generate(catalog));
+            sb.append("\nDatabase schema (").append(dialect.displayName()).append(" DDL):\n\n")
+              .append(DdlGenerator.generate(catalog, dialect));
         } else {
             sb.append("\nNo schema is currently loaded; say so if the question depends on it.\n");
         }
