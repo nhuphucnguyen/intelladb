@@ -49,9 +49,15 @@ Released 2026-09-29: MySQL support and SQL completion.
   is introspected even while "Show internal system schemas" is off.
 - Numeric result columns are recognised by normalised type name, including MySQL types.
 
-## 0.3.1
+## 0.1.0
 
-### Fixed
+Released 2026-09-29 (tag `v0.1.0`), the first tagged release: everything through M51.
+During development these notes were numbered 0.1.0–0.3.1; they are folded in here,
+newest first.
+
+### Pre-release 0.3.1
+
+#### Fixed
 - **The INSERT column↔value aid only worked near the start of a statement**: the
   statement's end offset was computed in token units instead of character offsets,
   so any caret inside the VALUES tuple (or on the closing part of the statement) fell
@@ -77,16 +83,16 @@ Released 2026-09-29: MySQL support and SQL completion.
 - The "Running…" status in results grids used raw blue, which was barely readable in
   dark themes; it now uses the theme's link color.
 
-## 0.3.0
+### Pre-release 0.3.0
 
 Released 2026-09-28. Includes everything below (M10-M18): the IntelliJ-style layout
 (consoles and data grids as editor tabs, schema selector in the console toolbar), the
 AI chat as a DB Explorer tab, readable SQL colors in dark themes, the JSON cell viewer,
 closable/bordered tabs, and the one-time password prompt.
 
-## 0.2.0
+### Pre-release 0.2.0
 
-### Changed
+#### Changed
 - **Layout now follows IntelliJ Ultimate's database tools**:
   - The **Database explorer** is a tree-only tool window (connections → schemas →
     objects) with the AI chat as its one work tab.
@@ -99,13 +105,13 @@ closable/bordered tabs, and the one-time password prompt.
     lists the connection's schemas and runs `SET search_path` before subsequent
     executions; the data source is shown next to it as "@<name>".
 
-### Changed
+#### Changed
 - **The AI Assistant now lives as a tab inside the DB Explorer** (next to SQL Console
   and data-preview tabs) instead of being a second tool-window icon in the stripe. It
   opens automatically, supports the same close/middle-click behavior as other tabs, and
   the toolbar's AI button plus the tree's "Ask AI about this table" open or focus it.
 
-### Added
+#### Added
 - **Cell value viewer**: double-click any cell in a results grid (console, View Data,
   AI chat results) to see the full value in a dialog with a Copy button. JSON and
   JSONB values are automatically pretty-printed.
@@ -114,7 +120,7 @@ closable/bordered tabs, and the one-time password prompt.
   instead of showing raw markdown syntax. The first SQL block keeps its Run /
   Insert into Console / Copy buttons.
 
-### Fixed
+#### Fixed
 - **Console SQL text was nearly invisible in dark themes** (dark-blue keywords on a
   dark background): the embedded editor resolved the platform SQL highlighter's
   attribute keys from the light default scheme. The console now uses the plugin's own
@@ -134,7 +140,7 @@ closable/bordered tabs, and the one-time password prompt.
   (IncorrectOperationException) — it now runs in a WriteCommandAction and the SQL lands
   in the console.
 
-### Improved
+#### Improved
 - The password prompt (shown only when a connection has no stored credential) now offers
   "Save password in the IDE credential store" — answering once stops the prompt from
   reappearing on every IDE start. Credentials are reused automatically: live session →
@@ -147,7 +153,7 @@ closable/bordered tabs, and the one-time password prompt.
 - Chat text wraps to the actual tool-window width, so nothing is cut off in narrow
   tool windows.
 
-## 0.1.0
+### Pre-release 0.1.0
 
 Initial release.
 
