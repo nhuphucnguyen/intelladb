@@ -73,6 +73,9 @@ public final class DbSession implements AutoCloseable {
     public static @NotNull Connection open(@NotNull DbConfig config, @Nullable String password, int timeoutSeconds)
             throws SQLException {
         DbDialect dialect = config.dialect();
+        if (config.allDatabases()) {
+            config = config.withDatabase(dialect.maintenanceDatabase());
+        }
         Properties props = new Properties();
         props.putAll(dialect.timeoutProperties(timeoutSeconds));
         props.putAll(dialect.connectionProperties(config));
@@ -148,13 +151,25 @@ public final class DbSession implements AutoCloseable {
      * Executes a single statement (SQL, or a MongoDB shell command) and materializes the
      * outcome. Must not be called on the EDT.
      */
-    public synchronized @NotNull SqlResult execute(@NotNull String sql) {
+    public @NotNull SqlResult execute(@NotNull String sql) {
+        return execute(null, sql);
+    }
+
+    /**
+     * As {@link #execute(String)}, on {@code database} when the connection browses every
+     * database ({@link DbConfig#allDatabases()}; "" is the one it starts on), else on the
+     * connection's own. The result names the database it ran on.
+     */
+    public synchronized @NotNull SqlResult execute(@Nullable String database, @NotNull String sql) {
         long start = System.currentTimeMillis();
         lastActivity = start;
         try {
             ensureOpen();
+            engine.useDatabase(database);
             running = true;
-            return engine.execute(sql);
+            SqlResult result = engine.execute(sql);
+            result.database = engine.database();
+            return result;
         } catch (SQLException e) {
             return SqlResult.error(sql, e.getMessage() == null ? e.toString() : e.getMessage(),
                     System.currentTimeMillis() - start);
@@ -178,22 +193,39 @@ public final class DbSession implements AutoCloseable {
      * Switches between auto-commit ("Tx: Auto") and manual transactions ("Tx: Manual").
      * Turning auto-commit back on commits the pending transaction.
      */
-    public synchronized void setAutoCommit(boolean autoCommit) throws SQLException {
+    public void setAutoCommit(boolean autoCommit) throws SQLException {
+        setAutoCommit(null, autoCommit);
+    }
+
+    /** As {@link #setAutoCommit(boolean)}, for {@code database} (see {@link #execute(String, String)}). */
+    public synchronized void setAutoCommit(@Nullable String database, boolean autoCommit) throws SQLException {
         ensureOpen();
+        engine.useDatabase(database);
         engine.setAutoCommit(autoCommit);
     }
 
-    public synchronized @NotNull SqlResult commit() {
-        return endTransaction("commit", true);
+    public @NotNull SqlResult commit() {
+        return commit(null);
     }
 
-    public synchronized @NotNull SqlResult rollback() {
-        return endTransaction("rollback", false);
+    public @NotNull SqlResult rollback() {
+        return rollback(null);
     }
 
-    private @NotNull SqlResult endTransaction(@NotNull String label, boolean commit) {
+    /** Commits the transaction on {@code database} (see {@link #execute(String, String)}). */
+    public synchronized @NotNull SqlResult commit(@Nullable String database) {
+        return endTransaction(database, "commit", true);
+    }
+
+    /** Rolls back the transaction on {@code database} (see {@link #execute(String, String)}). */
+    public synchronized @NotNull SqlResult rollback(@Nullable String database) {
+        return endTransaction(database, "rollback", false);
+    }
+
+    private @NotNull SqlResult endTransaction(@Nullable String database, @NotNull String label, boolean commit) {
         try {
             ensureOpen();
+            engine.useDatabase(database);
         } catch (SQLException e) {
             return SqlResult.error(label, e.getMessage() == null ? e.toString() : e.getMessage(), 0);
         }
@@ -204,11 +236,18 @@ public final class DbSession implements AutoCloseable {
      * Runs the UPDATEs / DELETEs of edited grid rows as one unit: each must change exactly
      * one row, or none of them stick (see the engine for how). Must not be called on the EDT.
      */
-    public synchronized @NotNull SqlResult applyRowUpdates(@NotNull List<String> statements) {
+    public @NotNull SqlResult applyRowUpdates(@NotNull List<String> statements) {
+        return applyRowUpdates(null, statements);
+    }
+
+    /** As {@link #applyRowUpdates(List)}, on {@code database} (see {@link #execute(String, String)}). */
+    public synchronized @NotNull SqlResult applyRowUpdates(@Nullable String database,
+                                                           @NotNull List<String> statements) {
         long start = System.currentTimeMillis();
         lastActivity = start;
         try {
             ensureOpen();
+            engine.useDatabase(database);
             running = true;
             return engine.applyRowUpdates(statements);
         } catch (SQLException e) {

@@ -54,7 +54,10 @@ public class DbConfig {
     public String startupScript = "";
 
     // Schemas
-    /** Schemas to introspect; empty means all non-system schemas. */
+    /**
+     * Schemas to introspect; empty means all non-system schemas. With {@link #allDatabases()}
+     * each entry is qualified as {@code database.schema} (see {@link #qualify}).
+     */
     public List<String> schemas = new ArrayList<>();
     public boolean showSystemSchemas = false;
 
@@ -64,6 +67,50 @@ public class DbConfig {
 
     public @NotNull DbDialect dialect() {
         return Dialects.byId(dialectId);
+    }
+
+    /**
+     * Whether the connection browses every database on the server: no database was given
+     * where databases hold schemas (PostgreSQL). Sessions then start on the dialect's
+     * maintenance database and open the others as they are used.
+     */
+    public boolean allDatabases() {
+        DbDialect dialect = dialect();
+        return database.isBlank() && !urlOnly && jdbcUrlOverride.isBlank()
+                && dialect.namespaces() == NamespaceModel.DATABASES_AND_SCHEMAS
+                && !dialect.maintenanceDatabase().isEmpty();
+    }
+
+    /** A copy of this connection bound to {@code database}. */
+    public @NotNull DbConfig withDatabase(@NotNull String database) {
+        DbConfig c = copy();
+        c.database = database;
+        return c;
+    }
+
+    /** An entry of {@link #schemas} under {@link #allDatabases()}. */
+    public static @NotNull String qualify(@NotNull String database, @NotNull String schema) {
+        return database + "." + schema;
+    }
+
+    /**
+     * The selected schemas of {@code database} under {@link #allDatabases()}: empty when
+     * every schema is shown, or when the database has none selected (see
+     * {@link #showsDatabase}). An entry belongs to the longest of {@code databases} it
+     * starts with, so "hr.eu.staff" is schema staff of database hr.eu when there is one.
+     */
+    public @NotNull List<String> schemasOf(@NotNull String database, @NotNull java.util.Collection<String> databases) {
+        String prefix = database + ".";
+        return schemas.stream()
+                .filter(s -> s.startsWith(prefix) && databases.stream().noneMatch(
+                        other -> other.length() > database.length() && s.startsWith(other + ".")))
+                .map(s -> s.substring(prefix.length()))
+                .toList();
+    }
+
+    /** Under {@link #allDatabases()}: whether {@code database} is introspected at all. */
+    public boolean showsDatabase(@NotNull String database, @NotNull java.util.Collection<String> databases) {
+        return schemas.isEmpty() || !schemasOf(database, databases).isEmpty();
     }
 
     public @NotNull String describe() {

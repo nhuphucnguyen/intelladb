@@ -31,6 +31,8 @@ public final class ConsoleStore implements PersistentStateComponent<ConsoleStore
         public String connectionId = "";
         public String sql = "";
         public @Nullable String schema;
+        /** The schema's database when the connection browses every database; null for the one it starts on. */
+        public @Nullable String database;
         public boolean open;
     }
 
@@ -80,8 +82,10 @@ public final class ConsoleStore implements PersistentStateComponent<ConsoleStore
         get(connectionId).sql = sql;
     }
 
-    public void setSchema(@NotNull String connectionId, @Nullable String schema) {
-        get(connectionId).schema = schema;
+    public void setSchema(@NotNull String connectionId, @Nullable String database, @Nullable String schema) {
+        ConsoleState console = get(connectionId);
+        console.database = database;
+        console.schema = schema;
     }
 
     public void setOpen(@NotNull String connectionId, boolean open) {

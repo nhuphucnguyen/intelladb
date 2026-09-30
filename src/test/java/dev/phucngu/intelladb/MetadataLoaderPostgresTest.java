@@ -124,6 +124,40 @@ class MetadataLoaderPostgresTest {
     }
 
     @Test
+    void withoutDatabaseBrowsesEveryDatabase() throws Exception {
+        assumeTrue(System.getenv("INTELLADB_TEST_URL") == null, "needs the default localhost server");
+        DbConfig config = new DbConfig();
+        config.user = env("INTELLADB_TEST_USER", "intella");
+        config.schemas.add(DbConfig.qualify("intelladb", SCHEMA));
+        String password = env("INTELLADB_TEST_PASSWORD", "intella123");
+        assertTrue(config.allDatabases());
+
+        DbSession session = new DbSession(config, password);
+        try {
+            SchemaCatalog catalog = session.loadCatalog();
+            assertEquals("postgres", catalog.database(), "starts on the maintenance database");
+            assertTrue(catalog.databases().containsAll(List.of("postgres", "intelladb")));
+            assertEquals(List.of("intelladb"), catalog.databaseCatalogs().stream().map(SchemaCatalog::database).toList(),
+                    "only databases with picked schemas are introspected");
+            assertEquals(List.of(SCHEMA), catalog.forDatabase("intelladb").schemaNames());
+            assertTrue(catalog.schemas().isEmpty(), "nothing picked in the starting database");
+
+            SqlResult other = session.execute("intelladb", "SELECT current_database()");
+            assertEquals("intelladb", other.rows.getFirst()[0]);
+            assertEquals("intelladb", other.database);
+            assertEquals("postgres", session.execute("", "SELECT current_database()").rows.getFirst()[0]);
+            assertEquals("postgres", session.execute("SELECT current_database()").rows.getFirst()[0],
+                    "no database: stays on the current one");
+        } finally {
+            session.close();
+        }
+
+        List<String> probed = config.dialect().probeSchemaNames(config, password);
+        assertTrue(probed.contains("intelladb." + SCHEMA), probed.toString());
+        assertTrue(probed.contains("postgres.public"), probed.toString());
+    }
+
+    @Test
     void openAppliesSessionOptions() throws SQLException {
         DbConfig config = new DbConfig();
         config.jdbcUrlOverride = env("INTELLADB_TEST_URL", "jdbc:postgresql://localhost:5432/intelladb");

@@ -677,7 +677,8 @@ public final class AiChatPanel extends JPanel implements Disposable {
             appendMessage(resultRow, false);
             int generation = chatGeneration;
             ApplicationManager.getApplication().executeOnPooledThread(() -> {
-                SqlResult result = session.execute(sql);
+                // The prompt's schema is the starting database's when the connection browses every database.
+                SqlResult result = session.execute(forConfig.allDatabases() ? "" : null, sql);
                 ApplicationManager.getApplication().invokeLater(() -> {
                     results.showResult(result);
                     // The grid's scroll panes exist once the result is shown.

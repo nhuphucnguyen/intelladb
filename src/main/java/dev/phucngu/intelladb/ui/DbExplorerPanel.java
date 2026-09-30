@@ -201,12 +201,17 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
 
     /** As {@link #openConsole(DbConfig)}; a non-null {@code sql} replaces the console text. */
     public @NotNull SqlConsole openConsole(@NotNull DbConfig config, @Nullable String sql) {
-        return openConsole(config, sql, null);
+        return openConsole(config, sql, null, null);
     }
 
-    /** As {@link #openConsole(DbConfig, String)}; a non-null {@code schema} becomes the console's default schema. */
-    public @NotNull SqlConsole openConsole(@NotNull DbConfig config, @Nullable String sql, @Nullable String schema) {
-        return openConsole(config, sql, schema, true);
+    /**
+     * As {@link #openConsole(DbConfig, String)}; a non-null {@code schema} becomes the console's
+     * default schema, and a non-null {@code database} its database when the connection
+     * browses every database.
+     */
+    public @NotNull SqlConsole openConsole(@NotNull DbConfig config, @Nullable String sql, @Nullable String database,
+                                           @Nullable String schema) {
+        return openConsole(config, sql, database, schema, true);
     }
 
     /** Reopens (without focus) the console tabs that were open when the IDE last closed. */
@@ -214,13 +219,13 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         for (String id : ConsoleStore.getInstance(project).openConsoles()) {
             DbConfig config = manager.findConfig(id);
             if (config != null) {
-                openConsole(config, null, null, false);
+                openConsole(config, null, null, null, false);
             }
         }
     }
 
-    private @NotNull SqlConsole openConsole(@NotNull DbConfig config, @Nullable String sql, @Nullable String schema,
-                                            boolean focus) {
+    private @NotNull SqlConsole openConsole(@NotNull DbConfig config, @Nullable String sql, @Nullable String database,
+                                            @Nullable String schema, boolean focus) {
         SqlConsole console = consoles.computeIfAbsent(config.id, id -> {
             SqlConsole created = new SqlConsole(project, this, config);
             Disposer.register(this, created);
@@ -229,8 +234,8 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         if (sql != null) {
             console.setSql(sql);
         }
-        if (schema != null) {
-            console.setSchema(schema);
+        if (database != null || schema != null) {
+            console.setSchema(database, schema);
         }
         var editors = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
                 .openFile(console.file(), focus);

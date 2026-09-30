@@ -353,7 +353,8 @@ public final class ResultsPanel extends JPanel {
         String target = insertTarget();
         String source;
         if (target != null) {
-            source = config != null && !config.database.isBlank() ? config.database + "." + target : target;
+            String database = result.database != null ? result.database : config == null ? "" : config.database;
+            source = !database.isBlank() ? database + "." + target : target;
         } else {
             source = result.sql.strip().replaceAll("\\s+", " ");
         }
@@ -380,7 +381,7 @@ public final class ResultsPanel extends JPanel {
         if (catalog == null) {
             return null;
         }
-        for (SchemaCatalog.Schema schema : catalog.schemas()) {
+        for (SchemaCatalog.Schema schema : catalog.forDatabase(result.database).schemas()) {
             if (result.sourceSchema != null && !schema.name().equals(result.sourceSchema)) {
                 continue;
             }
@@ -604,7 +605,7 @@ public final class ResultsPanel extends JPanel {
             grid.setEditsLocked(true);
             info.setText("Saving " + statements.size() + " row" + (statements.size() == 1 ? "" : "s") + "…");
             ApplicationManager.getApplication().executeOnPooledThread(() -> {
-                SqlResult outcome = session.applyRowUpdates(statements);
+                SqlResult outcome = session.applyRowUpdates(shown.database, statements);
                 ApplicationManager.getApplication().invokeLater(() ->
                         submitted(shown, statements, outcome, pendingSummary(updated, deleted, "row updated", "row deleted")));
             });

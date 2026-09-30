@@ -39,5 +39,18 @@ public interface SessionEngine {
 
     @NotNull SchemaCatalog loadCatalog() throws SQLException;
 
+    /**
+     * Makes {@code database} the one the next calls run on, when the connection browses
+     * every database ({@link DbConfig#allDatabases()}): "" is the database it starts on,
+     * null keeps the current one. Ignored by connections bound to one database.
+     */
+    default void useDatabase(@org.jetbrains.annotations.Nullable String database) throws SQLException {
+    }
+
+    /** The database calls currently run on, when the connection browses every database; else null. */
+    default @org.jetbrains.annotations.Nullable String database() {
+        return null;
+    }
+
     void close();
 }

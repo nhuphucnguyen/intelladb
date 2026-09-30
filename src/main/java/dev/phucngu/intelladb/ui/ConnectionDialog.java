@@ -175,6 +175,8 @@ public final class ConnectionDialog extends DialogWrapper {
     private final JBCheckBox showSystemSchemas = new JBCheckBox("Show internal system schemas");
     private final JBLabel schemaStatus = new JBLabel(" ");
     private boolean schemasLoaded;
+    /** Whether the Schemas tab lists {@code database.schema} (no database given, see {@link DbConfig#allDatabases()}). */
+    private boolean schemasQualified;
 
     // Advanced
     private final DefaultTableModel propertiesModel = new DefaultTableModel(new Object[]{"Name", "Value"}, 0);
@@ -658,6 +660,7 @@ public final class ConnectionDialog extends DialogWrapper {
         keyFile.setText(config.sslKey);
 
         allSchemas.setSelected(config.schemas.isEmpty());
+        schemasQualified = config.allDatabases();
         schemaList.clear();
         schemaStatus.setText(" ");
         for (String schema : config.schemas) {
@@ -919,6 +922,27 @@ public final class ConnectionDialog extends DialogWrapper {
         if (!nameEdited) {
             updateAutoName();
         }
+        resetSchemasOnScopeChange();
+    }
+
+    /**
+     * Giving or clearing the database switches the Schemas tab between one database's
+     * schemas and every database's {@code database.schema}: the picked ones no longer apply.
+     */
+    private void resetSchemasOnScopeChange() {
+        DbConfig probe = new DbConfig();
+        probe.dialectId = selectedDialect().id();
+        probe.database = databaseText();
+        probe.urlOnly = urlOnlyType.isSelected();
+        probe.jdbcUrlOverride = probe.urlOnly || urlOverridden ? urlField.getText().trim() : "";
+        boolean qualified = probe.allDatabases();
+        if (qualified != schemasQualified) {
+            schemasQualified = qualified;
+            schemasLoaded = false;
+            schemaList.clear();
+            allSchemas.setSelected(true);
+            schemaList.setEnabled(false);
+        }
     }
 
     private void updateAutoName() {
@@ -960,6 +984,9 @@ public final class ConnectionDialog extends DialogWrapper {
         keepAliveSeconds.setEnabled(keepAlive.isSelected());
         autoDisconnectSeconds.setEnabled(autoDisconnect.isSelected());
         schemaList.setEnabled(!allSchemas.isSelected());
+        if (!loading) {
+            resetSchemasOnScopeChange();
+        }
     }
 
     /** Lists the server's databases into the Database dropdown (on first open). */
@@ -992,17 +1019,23 @@ public final class ConnectionDialog extends DialogWrapper {
         });
     }
 
-    /** Lists the connected database's schemas with checkboxes; system schemas only on request. */
+    /**
+     * Lists the connected database's schemas with checkboxes; system schemas only on request.
+     * Without a database (PostgreSQL), every database's schemas as {@code database.schema}.
+     */
     private void loadSchemas() {
         schemasLoaded = true;
         DbConfig probe = snapshot();
+        boolean qualified = probe.allDatabases();
         Set<String> checked = new HashSet<>(checkedSchemas());
-        schemaStatus.setText("Loading schemas…");
+        schemaStatus.setText(qualified ? "Loading every database's schemas…" : "Loading schemas…");
         withProbe(probe, probe.dialect()::probeSchemaNames, names -> {
             schemaList.clear();
             int hidden = 0;
             for (String name : names) {
-                boolean isSystem = probe.dialect().isSystemSchema(name);
+                // Qualified names end in the schema; system schemas have no dots of their own.
+                boolean isSystem = probe.dialect().isSystemSchema(
+                        qualified ? name.substring(name.lastIndexOf('.') + 1) : name);
                 if (isSystem && !showSystemSchemas.isSelected() && !checked.contains(name)) {
                     hidden++;
                     continue;

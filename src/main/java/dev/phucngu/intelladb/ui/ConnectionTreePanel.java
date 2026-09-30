@@ -64,7 +64,8 @@ public final class ConnectionTreePanel implements Disposable {
     public record DatabaseEntry(DbConfig config, String name, int shownSchemas, int totalSchemas) {
     }
 
-    public record SchemaEntry(DbConfig config, String name) {
+    /** {@code database} is null unless the connection browses every database (as in TableEntry). */
+    public record SchemaEntry(DbConfig config, @Nullable String database, String name) {
     }
 
     /** A grouping node such as "tables 15"; {@code owner} tells same-kind folders apart. */
@@ -75,7 +76,10 @@ public final class ConnectionTreePanel implements Disposable {
     public record ObjectEntry(DbConfig config, ObjectKind kind, String name, String detail) {
     }
 
-    public record TableEntry(DbConfig config, String schema, TableMeta meta) {
+    public record TableEntry(DbConfig config, @Nullable String database, String schema, TableMeta meta) {
+        TableRef ref() {
+            return new TableRef(config, database, schema, meta);
+        }
     }
 
     public record ColumnEntry(DbConfig config, String schema, String table, String name, String type, boolean pk) {
@@ -201,10 +205,30 @@ public final class ConnectionTreePanel implements Disposable {
      * objects → per-table folders (columns, keys, foreign keys, indexes, checks), plus the
      * "Database Objects" and "Server Objects" groups — the layout of IntelliJ's database tools.
      * Where a database is just a schema (MySQL) there is no database node: the schemas hang
-     * off the connection, which carries the "shown of total" badge. Empty folders are left out.
+     * off the connection, which carries the "shown of total" badge. A connection without a
+     * database (PostgreSQL) gets a node per introspected database. Empty folders are left out.
      */
     private void appendCatalog(@NotNull DefaultMutableTreeNode configNode, @NotNull DbConfig config,
                                @NotNull SchemaCatalog catalog) {
+        if (catalog.databaseCatalogs().isEmpty()) {
+            appendDatabase(configNode, config, catalog, null);
+        } else {
+            for (SchemaCatalog database : catalog.databaseCatalogs()) {
+                appendDatabase(configNode, config, database, database.database());
+            }
+        }
+        if (!catalog.roles().isEmpty()) {
+            DefaultMutableTreeNode group = folderNode(config, Folder.SERVER_OBJECTS, "", 0);
+            configNode.add(group);
+            appendObjects(group, config, Folder.ROLES, "", catalog.roles().stream()
+                    .map(role -> new ObjectEntry(config, ObjectKind.ROLE, role, ""))
+                    .toList());
+        }
+    }
+
+    /** One database's schemas; {@code scope} names it when the connection browses every database. */
+    private void appendDatabase(@NotNull DefaultMutableTreeNode configNode, @NotNull DbConfig config,
+                                @NotNull SchemaCatalog catalog, @Nullable String scope) {
         boolean schemasOnly = config.dialect().namespaces() == NamespaceModel.SCHEMAS_ONLY;
         String database = catalog.database().isEmpty() ? config.database : catalog.database();
         DefaultMutableTreeNode databaseNode = schemasOnly ? configNode : new DefaultMutableTreeNode(
@@ -213,12 +237,12 @@ public final class ConnectionTreePanel implements Disposable {
             configNode.add(databaseNode);
         }
         for (SchemaCatalog.Schema schema : catalog.schemas()) {
-            DefaultMutableTreeNode schemaNode = new DefaultMutableTreeNode(new SchemaEntry(config, schema.name()));
+            DefaultMutableTreeNode schemaNode = new DefaultMutableTreeNode(new SchemaEntry(config, scope, schema.name()));
             databaseNode.add(schemaNode);
-            appendTables(schemaNode, config, schema, Folder.TABLES, TableMeta.Kind.TABLE);
-            appendTables(schemaNode, config, schema, Folder.VIEWS, TableMeta.Kind.VIEW);
-            appendTables(schemaNode, config, schema, Folder.MATERIALIZED_VIEWS, TableMeta.Kind.MATERIALIZED_VIEW);
-            appendTables(schemaNode, config, schema, Folder.FOREIGN_TABLES, TableMeta.Kind.FOREIGN_TABLE);
+            appendTables(schemaNode, config, scope, schema, Folder.TABLES, TableMeta.Kind.TABLE);
+            appendTables(schemaNode, config, scope, schema, Folder.VIEWS, TableMeta.Kind.VIEW);
+            appendTables(schemaNode, config, scope, schema, Folder.MATERIALIZED_VIEWS, TableMeta.Kind.MATERIALIZED_VIEW);
+            appendTables(schemaNode, config, scope, schema, Folder.FOREIGN_TABLES, TableMeta.Kind.FOREIGN_TABLE);
             appendObjects(schemaNode, config, Folder.ROUTINES, schema.name(), schema.routinesOf(false).stream()
                     .map(r -> new ObjectEntry(config,
                             r.kind() == SchemaCatalog.Routine.Kind.PROCEDURE ? ObjectKind.PROCEDURE : ObjectKind.FUNCTION,
@@ -241,17 +265,11 @@ public final class ConnectionTreePanel implements Disposable {
                     .map(e -> new ObjectEntry(config, ObjectKind.EXTENSION, e.name(), e.version()))
                     .toList());
         }
-        if (!catalog.roles().isEmpty()) {
-            DefaultMutableTreeNode group = folderNode(config, Folder.SERVER_OBJECTS, "", 0);
-            configNode.add(group);
-            appendObjects(group, config, Folder.ROLES, "", catalog.roles().stream()
-                    .map(role -> new ObjectEntry(config, ObjectKind.ROLE, role, ""))
-                    .toList());
-        }
     }
 
     private static void appendTables(@NotNull DefaultMutableTreeNode schemaNode, @NotNull DbConfig config,
-                                     @NotNull SchemaCatalog.Schema schema, @NotNull Folder folder,
+                                     @Nullable String database, @NotNull SchemaCatalog.Schema schema,
+                                     @NotNull Folder folder,
                                      TableMeta.@NotNull Kind kind) {
         List<TableMeta> tables = schema.tablesOf(kind);
         if (tables.isEmpty()) {
@@ -260,7 +278,7 @@ public final class ConnectionTreePanel implements Disposable {
         DefaultMutableTreeNode folderNode = folderNode(config, folder, schema.name(), tables.size());
         schemaNode.add(folderNode);
         for (TableMeta table : tables) {
-            DefaultMutableTreeNode tableNode = new DefaultMutableTreeNode(new TableEntry(config, schema.name(), table));
+            DefaultMutableTreeNode tableNode = new DefaultMutableTreeNode(new TableEntry(config, database, schema.name(), table));
             folderNode.add(tableNode);
             String owner = schema.name() + "." + table.name;
             if (!table.columns.isEmpty()) {
@@ -407,7 +425,7 @@ public final class ConnectionTreePanel implements Disposable {
     public @Nullable TableRef selectedTable() {
         Object entry = selectedEntry();
         if (entry instanceof TableEntry table) {
-            return new TableRef(table.config(), table.schema(), table.meta());
+            return table.ref();
         }
         return null;
     }
@@ -428,7 +446,10 @@ public final class ConnectionTreePanel implements Disposable {
         });
     }
 
-    /** Opens the connection down to its database so a fresh connect shows the schemas. */
+    /**
+     * Opens the connection down to its database so a fresh connect shows the schemas; with
+     * several databases, just the connection, so they are all in view.
+     */
     private void expandDatabase(@NotNull DbConfig config) {
         DefaultMutableTreeNode root = (DefaultMutableTreeNode) model.getRoot();
         for (int i = 0; i < root.getChildCount(); i++) {
@@ -436,7 +457,9 @@ public final class ConnectionTreePanel implements Disposable {
             if (configNode.getUserObject() instanceof ConfigEntry c && c.config().id.equals(config.id)
                     && configNode.getChildCount() > 0
                     && configNode.getFirstChild() instanceof DefaultMutableTreeNode databaseNode) {
-                if (databaseNode.getUserObject() instanceof DatabaseEntry) {
+                if (config.allDatabases()) {
+                    tree.expandPath(new TreePath(configNode.getPath()));
+                } else if (databaseNode.getUserObject() instanceof DatabaseEntry) {
                     tree.expandPath(new TreePath(databaseNode.getPath()));
                 } else if (config.dialect().namespaces() == NamespaceModel.SCHEMAS_ONLY) {
                     tree.expandPath(new TreePath(configNode.getPath())); // the schemas are right here
@@ -542,15 +565,18 @@ public final class ConnectionTreePanel implements Disposable {
     }
 
     private void openConsole(@NotNull DbConfig config) {
-        openConsole(config, null);
+        openConsole(config, null, null);
     }
 
-    /** Opens the connection's console; a non-null {@code schema} becomes its default schema. */
-    private void openConsole(@NotNull DbConfig config, @Nullable String schema) {
+    /**
+     * Opens the connection's console; a non-null {@code schema} becomes its default schema,
+     * in {@code database} when the connection browses every database.
+     */
+    private void openConsole(@NotNull DbConfig config, @Nullable String database, @Nullable String schema) {
         if (manager.session(config.id) != null) {
-            explorer.openConsole(config, null, schema);
+            explorer.openConsole(config, null, database, schema);
         } else {
-            explorer.withSession(config, session -> explorer.openConsole(config, null, schema));
+            explorer.withSession(config, session -> explorer.openConsole(config, null, database, schema));
         }
     }
 
@@ -609,7 +635,8 @@ public final class ConnectionTreePanel implements Disposable {
             group.add(action("Refresh Schema", "Reload metadata",
                     com.intellij.icons.AllIcons.Actions.Refresh, this::refreshSelected));
             group.add(action("New SQL Console", "Open a SQL console",
-                    com.intellij.icons.AllIcons.Nodes.Console, () -> openConsole(databaseEntry.config())));
+                    com.intellij.icons.AllIcons.Nodes.Console, () -> openConsole(databaseEntry.config(),
+                            databaseEntry.config().allDatabases() ? databaseEntry.name() : null, null)));
         } else if (entry instanceof FolderEntry) {
             group.add(action("Refresh Schema", "Reload metadata",
                     com.intellij.icons.AllIcons.Actions.Refresh, this::refreshSelected));
@@ -618,12 +645,14 @@ public final class ConnectionTreePanel implements Disposable {
             group.add(action("Refresh Schema", "Reload metadata",
                     com.intellij.icons.AllIcons.Actions.Refresh, this::refreshSelected));
             group.add(action("New SQL Console", "Open a SQL console",
-                    com.intellij.icons.AllIcons.Nodes.Console, () -> openConsole(config, schemaEntry.name())));
+                    com.intellij.icons.AllIcons.Nodes.Console,
+                    () -> openConsole(config, schemaEntry.database(), schemaEntry.name())));
             group.add(action("Copy Schema DDL", "Copy CREATE TABLE statements",
                     com.intellij.icons.AllIcons.Actions.Copy, () -> {
                         DbSession session = manager.session(config.id);
                         if (session != null && session.catalog() != null) {
-                            List<TableMeta> tables = session.catalog().schemas().stream()
+                            List<TableMeta> tables = session.catalog().forDatabase(schemaEntry.database()).schemas()
+                                    .stream()
                                     .filter(s -> s.name().equals(schemaEntry.name()))
                                     .findFirst().map(SchemaCatalog.Schema::tables).orElse(List.of());
                             copyDdl(new SchemaCatalog(List.of(
@@ -631,11 +660,12 @@ public final class ConnectionTreePanel implements Disposable {
                         }
                     }));
         } else if (entry instanceof TableEntry tableEntry) {
-            TableRef ref = new TableRef(tableEntry.config(), tableEntry.schema(), tableEntry.meta());
+            TableRef ref = tableEntry.ref();
             group.add(action("View Data", "Preview first 200 rows",
                     com.intellij.icons.AllIcons.Actions.Preview, () -> openTableData(ref)));
             group.add(action("New SQL Console", "Open a SQL console",
-                    com.intellij.icons.AllIcons.Nodes.Console, () -> openConsole(tableEntry.config(), tableEntry.schema())));
+                    com.intellij.icons.AllIcons.Nodes.Console, () -> openConsole(tableEntry.config(), tableEntry.database(),
+                            tableEntry.schema())));
             group.addSeparator();
             group.add(action("Copy Table DDL", "Copy CREATE TABLE statement",
                     com.intellij.icons.AllIcons.Actions.Copy, () -> copyDdl(new SchemaCatalog(List.of(
@@ -726,7 +756,8 @@ public final class ConnectionTreePanel implements Disposable {
                             appendBadge(plain, catalog.schemas().size(), catalog.totalSchemas());
                         }
                     } else if (catalog != null && !catalog.databases().isEmpty()) {
-                        appendBadge(plain, 1, catalog.databases().size());
+                        appendBadge(plain, catalog.databaseCatalogs().isEmpty() ? 1 : catalog.databaseCatalogs().size(),
+                                catalog.databases().size());
                     }
                 }
                 case DatabaseEntry d -> {
@@ -834,7 +865,7 @@ public final class ConnectionTreePanel implements Disposable {
                         connect(config.config());
                     }
                 } else if (entry instanceof TableEntry table) {
-                    openTableData(new TableRef(table.config(), table.schema(), table.meta()));
+                    openTableData(table.ref());
                 }
             }
         }

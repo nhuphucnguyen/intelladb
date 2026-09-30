@@ -42,6 +42,11 @@ public final class SqlResult {
     public final long durationMs;
     /** SQL that produced this result. */
     public final String sql;
+    /**
+     * Database the statement ran on, set by the session when the connection browses every
+     * database ({@link DbConfig#allDatabases()}); null otherwise.
+     */
+    public volatile @Nullable String database;
 
     private SqlResult(Kind kind, List<String> columns, List<String> columnTypes, List<Object[]> rows,
                       boolean truncated, long updateCount, String text, long durationMs, String sql,

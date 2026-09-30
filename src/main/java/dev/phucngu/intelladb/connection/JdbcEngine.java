@@ -11,15 +11,31 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
-/** The SQL dialects' engine: one JDBC connection, opened with {@link DbSession#open}. */
+/**
+ * The SQL dialects' engine: one JDBC connection, opened with {@link DbSession#open}. A
+ * connection that browses every database ({@link DbConfig#allDatabases()}) starts on the
+ * dialect's maintenance database and opens one more connection per database it is asked
+ * to run on, keeping each (and its transaction) until the session closes.
+ */
 final class JdbcEngine implements SessionEngine {
 
     private final DbConfig config;
     private final DbDialect dialect;
     private final String password;
+    private final boolean allDatabases;
+    /** Under allDatabases: the database the session starts on. */
+    private final String home;
+    /** The connection opened first; under allDatabases, the one to {@link #home}. */
+    private Connection homeConnection;
+    /** Under allDatabases: the other databases' connections, by database. */
+    private final Map<String, Connection> others = new LinkedHashMap<>();
+    /** The connection calls run on. */
     private Connection connection;
+    private String current;
     /** Statement currently executing, so {@link #cancel()} can interrupt it from another thread. */
     private volatile Statement running;
 
@@ -27,12 +43,14 @@ final class JdbcEngine implements SessionEngine {
         this.config = config;
         this.dialect = config.dialect();
         this.password = password;
+        this.allDatabases = config.allDatabases();
+        this.home = allDatabases ? dialect.maintenanceDatabase() : config.database;
     }
 
     @Override
     public boolean isOpen() {
         try {
-            return connection != null && !connection.isClosed();
+            return homeConnection != null && !homeConnection.isClosed();
         } catch (SQLException e) {
             return false;
         }
@@ -40,7 +58,9 @@ final class JdbcEngine implements SessionEngine {
 
     @Override
     public @NotNull String open() throws SQLException {
-        connection = DbSession.open(config, password, 10);
+        close();
+        homeConnection = connection = DbSession.open(config, password, 10);
+        current = home;
         try (Statement st = connection.createStatement();
              ResultSet rs = st.executeQuery("select version()")) {
             if (rs.next()) {
@@ -57,11 +77,39 @@ final class JdbcEngine implements SessionEngine {
         if (!isOpen()) {
             return;
         }
-        try (Statement st = connection.createStatement()) {
-            st.execute("SELECT 1");
-        } catch (SQLException ignored) {
-            // A dead connection shows up on the next real statement, which reconnects.
+        List<Connection> all = new ArrayList<>(others.values());
+        all.add(0, homeConnection);
+        for (Connection each : all) {
+            try (Statement st = each.createStatement()) {
+                st.execute("SELECT 1");
+            } catch (SQLException ignored) {
+                // A dead connection shows up on the next real statement, which reconnects.
+            }
         }
+    }
+
+    @Override
+    public void useDatabase(@Nullable String database) throws SQLException {
+        if (!allDatabases || database == null) {
+            return;
+        }
+        String target = database.isEmpty() ? home : database;
+        if (target.equals(home)) {
+            connection = homeConnection;
+        } else {
+            Connection other = others.get(target);
+            if (other == null || other.isClosed()) {
+                other = DbSession.open(config.withDatabase(target), password, 10);
+                others.put(target, other);
+            }
+            connection = other;
+        }
+        current = target;
+    }
+
+    @Override
+    public @Nullable String database() {
+        return allDatabases ? current : null;
     }
 
     @Override
@@ -245,17 +293,46 @@ final class JdbcEngine implements SessionEngine {
 
     @Override
     public @NotNull SchemaCatalog loadCatalog() throws SQLException {
-        return MetadataLoader.load(connection, dialect, config.schemas, config.showSystemSchemas);
+        if (!allDatabases) {
+            return MetadataLoader.load(connection, dialect, config.schemas, config.showSystemSchemas);
+        }
+        List<String> names = dialect.listDatabases(homeConnection);
+        List<SchemaCatalog> loaded = new ArrayList<>();
+        for (String name : names) {
+            if (!config.showsDatabase(name, names)) {
+                continue;
+            }
+            Connection open = name.equals(home) ? homeConnection : others.get(name);
+            boolean temporary = open == null || open.isClosed();
+            try {
+                Connection used = temporary ? DbSession.open(config.withDatabase(name), password, 10) : open;
+                try {
+                    loaded.add(MetadataLoader.load(used, dialect, config.schemasOf(name, names), config.showSystemSchemas));
+                } finally {
+                    if (temporary) {
+                        used.close();
+                    }
+                }
+            } catch (SQLException ignored) {
+                // A database the user may not connect to: left out, like a filtered one.
+            }
+        }
+        return SchemaCatalog.ofDatabases(home, loaded, names);
     }
 
     @Override
     public void close() {
-        if (connection != null) {
+        List<Connection> all = new ArrayList<>(others.values());
+        if (homeConnection != null) {
+            all.add(homeConnection);
+        }
+        for (Connection each : all) {
             try {
-                connection.close();
+                each.close();
             } catch (SQLException ignored) {
             }
-            connection = null;
         }
+        others.clear();
+        homeConnection = connection = null;
     }
 }

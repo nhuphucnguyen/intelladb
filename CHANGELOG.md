@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **PostgreSQL connections without a database browse every database.** Leave Database empty
+  and the tree shows each database on the server with its schemas; the Schemas tab lists
+  every database's schemas as `database.schema`, so you can pick exactly the ones to show
+  (databases with nothing picked are left out). The session starts on `postgres` and opens a
+  connection per database as you use it: View Data, the console (its schema switcher lists
+  schemas by database), edits written back from results, and Commit / Rollback all run on
+  the right database. Databases you may not connect to are skipped.
+
 ## 0.3.0
 
 ### Added

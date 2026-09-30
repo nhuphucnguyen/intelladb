@@ -97,6 +97,8 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
     private TxMode txMode;
     private RunMode runMode = RunMode.PLAYGROUND;
     private @Nullable String schema;
+    /** The schema's database when the connection browses every database; null for the one it starts on. */
+    private @Nullable String database;
     /** Header toolbars of this console's open editors, refreshed when the schema changes. */
     private final List<ActionToolbar> toolbars = new java.util.concurrent.CopyOnWriteArrayList<>();
     private volatile boolean running;
@@ -133,6 +135,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
                 WriteCommandAction.runWriteCommandAction(project, () -> document.setText(saved.sql));
             }
             schema = saved.schema;
+            database = saved.database;
         }
         document.addDocumentListener(new com.intellij.openapi.editor.event.DocumentListener() {
             @Override
@@ -165,10 +168,14 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
                 document.replaceString(0, document.getTextLength(), sql));
     }
 
-    /** Makes {@code name} the console's default schema, as picking it in the schema switcher does. */
-    public void setSchema(@NotNull String name) {
+    /**
+     * Makes {@code name} (null: the default) the console's default schema, in {@code database}
+     * when the connection browses every database — as picking it in the schema switcher does.
+     */
+    public void setSchema(@Nullable String database, @Nullable String name) {
+        this.database = config.allDatabases() ? database : null;
         schema = name;
-        ConsoleStore.getInstance(project).setSchema(config.id, name);
+        ConsoleStore.getInstance(project).setSchema(config.id, this.database, name);
         toolbars.forEach(ActionToolbar::updateActionsAsync); // show it now, not on the next UI tick
     }
 
@@ -346,10 +353,11 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         cancelled = false;
         boolean autoCommit = txMode == TxMode.AUTO;
         String targetSchema = schema;
+        String targetDatabase = sessionDatabase();
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             try {
-                session.setAutoCommit(autoCommit);
-                applySchema(session, targetSchema);
+                session.setAutoCommit(targetDatabase, autoCommit);
+                applySchema(session, targetDatabase, targetSchema);
             } catch (SQLException e) {
                 edt(() -> view.logError(e.getMessage() == null ? e.toString() : e.getMessage()));
                 edt(this::finish);
@@ -362,7 +370,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
                     break;
                 }
                 edt(() -> view.logStatement(config.name, statement.text()));
-                SqlResult result = session.execute(statement.text());
+                SqlResult result = session.execute(targetDatabase, statement.text());
                 int index = ++resultIndex;
                 edt(() -> {
                     if (statement.start() >= 0) {
@@ -401,7 +409,8 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
      * reconnect starts from the default, and a ROLLBACK undoes a SET made inside the
      * transaction — any of which silently put it back on the default schema.
      */
-    private void applySchema(@NotNull DbSession session, @Nullable String target) throws SQLException {
+    private void applySchema(@NotNull DbSession session, @Nullable String database, @Nullable String target)
+            throws SQLException {
         if (target == null) {
             return;
         }
@@ -409,10 +418,19 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         if (statement == null) {
             return;
         }
-        SqlResult result = session.execute(statement);
+        SqlResult result = session.execute(database, statement);
         if (!result.isSuccessful()) {
             throw new SQLException(result.text);
         }
+    }
+
+    /**
+     * The database the console's statements run on, as the session's methods take it: the
+     * picked one ("" for the one the session starts on) when the connection browses every
+     * database, else null.
+     */
+    private @Nullable String sessionDatabase() {
+        return config.allDatabases() ? (database == null ? "" : database) : null;
     }
 
     /**
@@ -457,7 +475,9 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
     /** What completion in this console suggests from (called on a background thread). */
     private @NotNull CompletionScope completionScope() {
         DbSession session = explorer.sessionOf(config);
-        return CompletionScope.of(config.dialect(), session == null ? null : session.catalog(), effectiveSchema());
+        return CompletionScope.of(config.dialect(),
+                session == null || session.catalog() == null ? null : session.catalog().forDatabase(sessionDatabase()),
+                effectiveSchema());
     }
 
     private @NotNull List<String> schemaNames() {
@@ -466,7 +486,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         if (catalog == null) {
             return List.of();
         }
-        return catalog.schemas().stream().map(SchemaCatalog.Schema::name).toList();
+        return catalog.forDatabase(sessionDatabase()).schemas().stream().map(SchemaCatalog.Schema::name).toList();
     }
 
     @Override
@@ -547,9 +567,10 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
             return; // applied on the next run
         }
         ConsoleResultsView view = ResultsHub.getInstance(project).viewFor(this);
+        String target = sessionDatabase();
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             try {
-                session.setAutoCommit(mode == TxMode.AUTO);
+                session.setAutoCommit(target, mode == TxMode.AUTO);
                 edt(() -> view.logInfo(mode == TxMode.AUTO
                         ? "Auto-commit on (any pending transaction was committed)"
                         : "Manual transaction mode: use Commit / Rollback"));
@@ -576,8 +597,9 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
                 return;
             }
             ConsoleResultsView view = ResultsHub.getInstance(project).viewFor(SqlConsole.this);
+            String target = sessionDatabase();
             ApplicationManager.getApplication().executeOnPooledThread(() -> {
-                SqlResult result = commit ? session.commit() : session.rollback();
+                SqlResult result = commit ? session.commit(target) : session.rollback(target);
                 edt(() -> {
                     view.logStatement(config.name, commit ? "COMMIT" : "ROLLBACK");
                     view.logResult(result);
@@ -642,6 +664,24 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         protected @NotNull DefaultActionGroup createPopupActionGroup(@NotNull JComponent button,
                                                                      @NotNull DataContext context) {
             DefaultActionGroup group = new DefaultActionGroup();
+            DbSession session = explorer.sessionOf(config);
+            SchemaCatalog catalog = session == null ? null : session.catalog();
+            if (catalog != null && !catalog.databaseCatalogs().isEmpty()) {
+                // Every database's schemas, under a separator per database.
+                for (SchemaCatalog each : catalog.databaseCatalogs()) {
+                    group.addSeparator(each.database());
+                    String db = each.database().equals(catalog.database()) ? null : each.database();
+                    for (SchemaCatalog.Schema s : each.schemas()) {
+                        group.add(new DumbAwareAction(s.name(), null, IntellaDbIcons.SCHEMA) {
+                            @Override
+                            public void actionPerformed(@NotNull AnActionEvent e) {
+                                setSchema(db, s.name());
+                            }
+                        });
+                    }
+                }
+                return group;
+            }
             List<String> names = schemaNames();
             if (names.isEmpty()) {
                 group.add(new DumbAwareAction("Connect to Load Schemas", null, AllIcons.Actions.Execute) {
@@ -656,7 +696,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
                 group.add(new DumbAwareAction(name, null, IntellaDbIcons.SCHEMA) {
                     @Override
                     public void actionPerformed(@NotNull AnActionEvent e) {
-                        setSchema(name);
+                        setSchema(null, name);
                     }
                 });
             }
@@ -669,8 +709,9 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
             String effective = effectiveSchema();
             String shown = effective != null ? effective : "<schema>";
             // With catalogs as schemas there is no database level to prefix.
-            e.getPresentation().setText(dialect.namespaces() == NamespaceModel.SCHEMAS_ONLY ? shown
-                    : (config.database.isBlank() ? config.name : config.database) + "." + shown);
+            String db = config.allDatabases() ? (database != null ? database : dialect.maintenanceDatabase())
+                    : config.database.isBlank() ? config.name : config.database;
+            e.getPresentation().setText(dialect.namespaces() == NamespaceModel.SCHEMAS_ONLY ? shown : db + "." + shown);
             e.getPresentation().setIcon(IntellaDbIcons.SCHEMA);
         }
 

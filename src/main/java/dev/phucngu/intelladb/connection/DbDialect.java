@@ -91,11 +91,29 @@ public interface DbDialect {
         }
     }
 
-    /** The dialog's Schemas tab: every schema, system ones included, on a throwaway connection. */
+    /**
+     * The dialog's Schemas tab: every schema, system ones included, on throwaway connections.
+     * When the connection browses every database, every database's schemas, qualified as
+     * {@code database.schema} ({@link DbConfig#qualify}); databases the user may not
+     * connect to are left out.
+     */
     default @NotNull java.util.List<String> probeSchemaNames(@NotNull DbConfig config, @Nullable String password)
             throws Exception {
         try (java.sql.Connection connection = DbSession.open(config, password, 5)) {
-            return dev.phucngu.intelladb.schema.MetadataLoader.schemaNames(connection, this);
+            if (!config.allDatabases()) {
+                return dev.phucngu.intelladb.schema.MetadataLoader.schemaNames(connection, this);
+            }
+            java.util.List<String> names = new java.util.ArrayList<>();
+            for (String database : listDatabases(connection)) {
+                try (java.sql.Connection other = DbSession.open(config.withDatabase(database), password, 5)) {
+                    for (String schema : dev.phucngu.intelladb.schema.MetadataLoader.schemaNames(other, this)) {
+                        names.add(DbConfig.qualify(database, schema));
+                    }
+                } catch (java.sql.SQLException ignored) {
+                    // no CONNECT privilege, or the database is being dropped
+                }
+            }
+            return names;
         }
     }
 
