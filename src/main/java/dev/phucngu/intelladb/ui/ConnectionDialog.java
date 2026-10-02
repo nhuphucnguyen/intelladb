@@ -20,7 +20,6 @@ import com.intellij.openapi.ui.popup.Balloon;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.AnimatedIcon;
-import com.intellij.ui.CheckBoxList;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.DocumentAdapter;
@@ -171,7 +170,7 @@ public final class ConnectionDialog extends DialogWrapper {
 
     // Schemas
     private final JBCheckBox allSchemas = new JBCheckBox("All schemas", true);
-    private final CheckBoxList<String> schemaList = new CheckBoxList<>();
+    private final SchemaCheckTree schemaList = new SchemaCheckTree();
     private final JBCheckBox showSystemSchemas = new JBCheckBox("Show internal system schemas");
     private final JBLabel schemaStatus = new JBLabel(" ");
     private boolean schemasLoaded;
@@ -572,7 +571,7 @@ public final class ConnectionDialog extends DialogWrapper {
 
         JPanel panel = new JPanel(new BorderLayout(0, JBUI.scale(6)));
         panel.add(top, BorderLayout.NORTH);
-        panel.add(new JBScrollPane(schemaList), BorderLayout.CENTER);
+        panel.add(new JBScrollPane(schemaList.component()), BorderLayout.CENTER);
         JPanel bottom = new JPanel(new BorderLayout());
         bottom.add(showSystemSchemas, BorderLayout.NORTH);
         bottom.add(schemaStatus, BorderLayout.SOUTH);
@@ -664,8 +663,13 @@ public final class ConnectionDialog extends DialogWrapper {
         schemaList.clear();
         schemaStatus.setText(" ");
         for (String schema : config.schemas) {
-            schemaList.addItem(schema, schema, true);
+            // Until the tab loads the server's list: saved database.schema entries grouped by
+            // their first dot (display only; the saved value is kept as is).
+            int dot = schemasQualified ? schema.indexOf('.') : -1;
+            schemaList.add(dot < 0 ? null : schema.substring(0, dot),
+                    new SchemaCheckTree.Item(schema, dot < 0 ? schema : schema.substring(dot + 1), false), true);
         }
+        schemaList.reload();
         showSystemSchemas.setSelected(config.showSystemSchemas);
 
         stopEditing();
@@ -737,7 +741,7 @@ public final class ConnectionDialog extends DialogWrapper {
             return new ValidationInfo("Enter the host", hostField);
         }
         if (!allSchemas.isSelected() && checkedSchemas().isEmpty()) {
-            return new ValidationInfo("Select at least one schema, or check All schemas", schemaList);
+            return new ValidationInfo("Select at least one schema, or check All schemas", schemaList.component());
         }
         return null;
     }
@@ -1021,7 +1025,7 @@ public final class ConnectionDialog extends DialogWrapper {
 
     /**
      * Lists the connected database's schemas with checkboxes; system schemas only on request.
-     * Without a database (PostgreSQL), every database's schemas as {@code database.schema}.
+     * Without a database (PostgreSQL), every database with its schemas beneath it.
      */
     private void loadSchemas() {
         schemasLoaded = true;
@@ -1029,21 +1033,26 @@ public final class ConnectionDialog extends DialogWrapper {
         boolean qualified = probe.allDatabases();
         Set<String> checked = new HashSet<>(checkedSchemas());
         schemaStatus.setText(qualified ? "Loading every database's schemas…" : "Loading schemas…");
-        withProbe(probe, probe.dialect()::probeSchemaNames, names -> {
+        DbDialect dialect = probe.dialect();
+        withProbe(probe, (config, password) -> qualified ? dialect.probeDatabaseSchemas(config, password)
+                : java.util.Map.of("", dialect.probeSchemaNames(config, password)), byDatabase -> {
             schemaList.clear();
             int hidden = 0;
-            for (String name : names) {
-                // Qualified names end in the schema; system schemas have no dots of their own.
-                boolean isSystem = probe.dialect().isSystemSchema(
-                        qualified ? name.substring(name.lastIndexOf('.') + 1) : name);
-                if (isSystem && !showSystemSchemas.isSelected() && !checked.contains(name)) {
-                    hidden++;
-                    continue;
+            for (var entry : byDatabase.entrySet()) {
+                for (String schema : entry.getValue()) {
+                    String value = qualified ? DbConfig.qualify(entry.getKey(), schema) : schema;
+                    boolean isSystem = dialect.isSystemSchema(schema);
+                    if (isSystem && !showSystemSchemas.isSelected() && !checked.contains(value)) {
+                        hidden++;
+                        continue;
+                    }
+                    boolean selected = checked.isEmpty() ? !isSystem : checked.contains(value);
+                    schemaList.add(qualified ? entry.getKey() : null,
+                            new SchemaCheckTree.Item(value, schema, isSystem), selected);
                 }
-                boolean selected = checked.isEmpty() ? !isSystem : checked.contains(name);
-                schemaList.addItem(name, isSystem ? name + "  (system)" : name, selected);
             }
-            schemaStatus.setText(schemaList.getItemsCount() == 0 && hidden > 0
+            schemaList.reload();
+            schemaStatus.setText(schemaList.schemaCount() == 0 && hidden > 0
                     ? "The server has only system schemas (" + hidden + "); tick \"Show internal system schemas\" to list them."
                     : " ");
         }, error -> {
@@ -1173,13 +1182,7 @@ public final class ConnectionDialog extends DialogWrapper {
     }
 
     private @NotNull List<String> checkedSchemas() {
-        List<String> names = new ArrayList<>();
-        for (int i = 0; i < schemaList.getModel().getSize(); i++) {
-            if (schemaList.isItemSelected(i)) {
-                names.add(schemaList.getItemAt(i));
-            }
-        }
-        return names;
+        return schemaList.checked();
     }
 
     /** A spinner only commits typed text on focus loss or Enter; OK can arrive before either. */

@@ -68,6 +68,8 @@ final class ResultGrid extends JBTable {
     /** Per-cell JSON detection, computed lazily once per result (key: modelRow * columns + modelColumn). */
     private final java.util.Map<Long, JsonKind> jsonCells = new java.util.HashMap<>();
     private GridModel model = new GridModel(List.of(), List.of(), List.of());
+    /** Model indexes of the columns that are the source table's primary key. */
+    private java.util.Set<Integer> keyColumns = java.util.Set.of();
 
     ResultGrid(@NotNull Project project) {
         this.project = project;
@@ -131,6 +133,7 @@ final class ResultGrid extends JBTable {
                 ? new GridModel(List.of(), List.of(), List.of())
                 : new GridModel(result.columns, result.columnTypes, result.rows);
         jsonCells.clear();
+        keyColumns = java.util.Set.of();
         setModel(model);
         model.addTableModelListener(e -> jsonCells.clear()); // an edit can make a cell (non-)JSON
         TableRowSorter<GridModel> sorter = new TableRowSorter<>(model);
@@ -142,6 +145,12 @@ final class ResultGrid extends JBTable {
         installHeaderRenderer();
         fitColumns();
         rowHeader.refresh();
+    }
+
+    /** Marks the columns (model indexes) that are the source table's primary key in their headers. */
+    void setKeyColumns(@NotNull java.util.Set<Integer> columns) {
+        keyColumns = columns;
+        getTableHeader().repaint();
     }
 
     // ------------------------------------------------------------------ editing
@@ -490,7 +499,7 @@ final class ResultGrid extends JBTable {
         }
     }
 
-    /** Keeps the platform header look (sort arrows) and adds the column icon + type tooltip. */
+    /** Keeps the platform header look (sort arrows) and adds the column (or key column) icon + type tooltip. */
     private void installHeaderRenderer() {
         TableCellRenderer base = getTableHeader().getDefaultRenderer();
         for (int c = 0; c < getColumnModel().getColumnCount(); c++) {
@@ -499,10 +508,12 @@ final class ResultGrid extends JBTable {
             column.setHeaderRenderer((table, value, selected, focus, row, col) -> {
                 Component component = base.getTableCellRendererComponent(table, value, selected, focus, row, col);
                 if (component instanceof JLabel label) {
-                    label.setIcon(IntellaDbIcons.COLUMN);
+                    boolean key = keyColumns.contains(modelIndex);
+                    label.setIcon(key ? IntellaDbIcons.PRIMARY_KEY_COLUMN : IntellaDbIcons.COLUMN);
                     label.setHorizontalAlignment(SwingConstants.LEFT);
                     String type = model.type(modelIndex);
-                    label.setToolTipText(type.isEmpty() ? String.valueOf(value) : value + " : " + type);
+                    label.setToolTipText((type.isEmpty() ? String.valueOf(value) : value + " : " + type)
+                            + (key ? " (primary key)" : ""));
                 }
                 return component;
             });

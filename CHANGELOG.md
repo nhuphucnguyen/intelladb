@@ -9,7 +9,11 @@
   (databases with nothing picked are left out). The session starts on `postgres` and opens a
   connection per database as you use it: View Data, the console (its schema switcher lists
   schemas by database), edits written back from results, and Commit / Rollback all run on
-  the right database. Databases you may not connect to are skipped.
+  the right database. Databases you may not connect to are skipped. In the Schemas tab each
+  database expands to its schemas; checking a database checks all of them.
+- **Primary key columns are marked** with a key beside the column icon — in the explorer
+  tree and in the results grid's column headers (when the rows come from one known table) —
+  and their tooltips say "primary key".
 
 ## 0.3.0
 

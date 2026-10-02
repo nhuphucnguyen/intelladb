@@ -89,7 +89,11 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
 
     private final Project project;
     private final DbExplorerPanel explorer;
-    private final DbConfig config;
+    /**
+     * The connection as it was when the console opened; {@link #config()} is the current one
+     * (editing a connection saves a new {@link DbConfig} under the same id).
+     */
+    private final DbConfig initialConfig;
     private final LightVirtualFile file;
     private final Document document;
     private final ExecutionMarkers markers;
@@ -107,7 +111,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
     SqlConsole(@NotNull Project project, @NotNull DbExplorerPanel explorer, @NotNull DbConfig config) {
         this.project = project;
         this.explorer = explorer;
-        this.config = config;
+        this.initialConfig = config;
         this.txMode = config.autoCommit ? TxMode.AUTO : TxMode.MANUAL;
         DbDialect dialect = config.dialect();
         boolean mongo = dialect.consoleLanguage() == ConsoleLanguage.MONGO_SHELL;
@@ -129,7 +133,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
     /** Picks up the text and schema the console had before the IDE restarted; keeps them saved. */
     private void restore() {
         ConsoleStore store = ConsoleStore.getInstance(project);
-        ConsoleStore.ConsoleState saved = store.find(config.id);
+        ConsoleStore.ConsoleState saved = store.find(config().id);
         if (saved != null) {
             if (!saved.sql.isEmpty()) {
                 WriteCommandAction.runWriteCommandAction(project, () -> document.setText(saved.sql));
@@ -140,13 +144,16 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         document.addDocumentListener(new com.intellij.openapi.editor.event.DocumentListener() {
             @Override
             public void documentChanged(@NotNull com.intellij.openapi.editor.event.DocumentEvent event) {
-                store.setSql(config.id, document.getText());
+                store.setSql(config().id, document.getText());
             }
         }, this);
     }
 
+    /** The connection's current settings, so the console follows edits made after it opened. */
     public @NotNull DbConfig config() {
-        return config;
+        DbConfig current = dev.phucngu.intelladb.connection.ConnectionManager.getInstance(project)
+                .findConfig(initialConfig.id);
+        return current != null ? current : initialConfig;
     }
 
     @NotNull LightVirtualFile file() {
@@ -155,7 +162,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
 
     /** Tab / tree title, e.g. {@code console [@localhost]}. */
     @NotNull String title() {
-        return "console [@" + config.name + "]";
+        return "console [@" + config().name + "]";
     }
 
     public @NotNull String sql() {
@@ -173,9 +180,9 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
      * when the connection browses every database — as picking it in the schema switcher does.
      */
     public void setSchema(@Nullable String database, @Nullable String name) {
-        this.database = config.allDatabases() ? database : null;
+        this.database = config().allDatabases() ? database : null;
         schema = name;
-        ConsoleStore.getInstance(project).setSchema(config.id, this.database, name);
+        ConsoleStore.getInstance(project).setSchema(config().id, this.database, name);
         toolbars.forEach(ActionToolbar::updateActionsAsync); // show it now, not on the next UI tick
     }
 
@@ -283,7 +290,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         if (statements.isEmpty()) {
             return;
         }
-        explorer.withSession(config, session -> start(session, statements, null));
+        explorer.withSession(config(), session -> start(session, statements, null));
     }
 
     private @NotNull List<SqlSplitter.Statement> pick(@NotNull Editor editor) {
@@ -293,15 +300,15 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
             int base = selection.getSelectionStart();
             List<SqlSplitter.Statement> shifted = new ArrayList<>();
             for (SqlSplitter.Statement s : SqlSplitter.ranges(text.substring(base, selection.getSelectionEnd()),
-                    config.dialect().splitterOptions())) {
+                    config().dialect().splitterOptions())) {
                 shifted.add(new SqlSplitter.Statement(base + s.start(), base + s.end(), s.text()));
             }
             return shifted;
         }
         if (runMode == RunMode.SCRIPT) {
-            return SqlSplitter.ranges(text, config.dialect().splitterOptions());
+            return SqlSplitter.ranges(text, config().dialect().splitterOptions());
         }
-        SqlSplitter.Statement atCaret = SqlSplitter.at(text, editor.getCaretModel().getOffset(), config.dialect().splitterOptions());
+        SqlSplitter.Statement atCaret = SqlSplitter.at(text, editor.getCaretModel().getOffset(), config().dialect().splitterOptions());
         return atCaret == null ? List.of() : List.of(atCaret);
     }
 
@@ -311,14 +318,14 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         if (previous == null || running) {
             return;
         }
-        explorer.withSession(config, session ->
+        explorer.withSession(config(), session ->
                 start(session, List.of(new SqlSplitter.Statement(-1, -1, previous.sql)), panel));
     }
 
     @Override
     public void rowsUpdated(@NotNull List<String> statements, @NotNull SqlResult outcome) {
         ConsoleResultsView view = ResultsHub.getInstance(project).viewFor(this);
-        view.logSubmit(config.name, statements);
+        view.logSubmit(config().name, statements);
         view.logResult(outcome);
     }
 
@@ -328,7 +335,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
             return;
         }
         cancelled = true;
-        DbSession session = explorer.sessionOf(config);
+        DbSession session = explorer.sessionOf(config());
         if (session != null) {
             ApplicationManager.getApplication().executeOnPooledThread(session::cancel);
         }
@@ -369,7 +376,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
                     edt(() -> view.logInfo("Execution cancelled"));
                     break;
                 }
-                edt(() -> view.logStatement(config.name, statement.text()));
+                edt(() -> view.logStatement(config().name, statement.text()));
                 SqlResult result = session.execute(targetDatabase, statement.text());
                 int index = ++resultIndex;
                 edt(() -> {
@@ -377,11 +384,11 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
                         markers.mark(statement.start(), statement.end(), result);
                     }
                     view.logResult(result);
-                    QueryHistory.getInstance(project).add(config, targetSchema, statement.text(), result);
+                    QueryHistory.getInstance(project).add(config(), targetSchema, statement.text(), result);
                     if (into != null) {
                         into.showResult(result);
                     } else if (result.kind == SqlResult.Kind.ROWS) {
-                        String fromDriver = result.qualifiedSource(config.dialect());
+                        String fromDriver = result.qualifiedSource(config().dialect());
                         String table = fromDriver != null ? fromDriver : sourceTable(statement.text());
                         ResultsPanel panel = view.addResult(result,
                                 table != null ? table : "Result " + index, this);
@@ -414,7 +421,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         if (target == null) {
             return;
         }
-        String statement = config.dialect().useNamespaceStatement(target);
+        String statement = config().dialect().useNamespaceStatement(target);
         if (statement == null) {
             return;
         }
@@ -430,7 +437,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
      * database, else null.
      */
     private @Nullable String sessionDatabase() {
-        return config.allDatabases() ? (database == null ? "" : database) : null;
+        return config().allDatabases() ? (database == null ? "" : database) : null;
     }
 
     /**
@@ -438,7 +445,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
      * {@code schema.table} for a simple SELECT … FROM t, else null (tab gets "Result n").
      */
     private @Nullable String sourceTable(@NotNull String sql) {
-        DbDialect dialect = config.dialect();
+        DbDialect dialect = config().dialect();
         Matcher m = FROM_TABLE.matcher(SqlSplitter.stripLeadingComments(sql, dialect.splitterOptions()));
         if (!m.find()) {
             return null;
@@ -464,24 +471,24 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         if (schema != null) {
             return schema;
         }
-        DbDialect dialect = config.dialect();
+        DbDialect dialect = config().dialect();
         String fallback = dialect.defaultSchema();
         if (fallback == null && dialect.namespaces() == NamespaceModel.SCHEMAS_ONLY) {
-            fallback = config.database;
+            fallback = config().database;
         }
         return fallback != null && schemaNames().contains(fallback) ? fallback : null;
     }
 
     /** What completion in this console suggests from (called on a background thread). */
     private @NotNull CompletionScope completionScope() {
-        DbSession session = explorer.sessionOf(config);
-        return CompletionScope.of(config.dialect(),
+        DbSession session = explorer.sessionOf(config());
+        return CompletionScope.of(config().dialect(),
                 session == null || session.catalog() == null ? null : session.catalog().forDatabase(sessionDatabase()),
                 effectiveSchema());
     }
 
     private @NotNull List<String> schemaNames() {
-        DbSession session = explorer.sessionOf(config);
+        DbSession session = explorer.sessionOf(config());
         SchemaCatalog catalog = session == null ? null : session.catalog();
         if (catalog == null) {
             return List.of();
@@ -562,7 +569,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
             return;
         }
         txMode = mode;
-        DbSession session = explorer.sessionOf(config);
+        DbSession session = explorer.sessionOf(config());
         if (session == null) {
             return; // applied on the next run
         }
@@ -592,7 +599,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
 
         @Override
         public void actionPerformed(@NotNull AnActionEvent e) {
-            DbSession session = explorer.sessionOf(config);
+            DbSession session = explorer.sessionOf(config());
             if (session == null) {
                 return;
             }
@@ -601,7 +608,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
             ApplicationManager.getApplication().executeOnPooledThread(() -> {
                 SqlResult result = commit ? session.commit(target) : session.rollback(target);
                 edt(() -> {
-                    view.logStatement(config.name, commit ? "COMMIT" : "ROLLBACK");
+                    view.logStatement(config().name, commit ? "COMMIT" : "ROLLBACK");
                     view.logResult(result);
                 });
             });
@@ -610,7 +617,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         @Override
         public void update(@NotNull AnActionEvent e) {
             e.getPresentation().setEnabled(txMode == TxMode.MANUAL && !running
-                    && explorer.sessionOf(config) != null);
+                    && explorer.sessionOf(config()) != null);
         }
 
         @Override
@@ -664,7 +671,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         protected @NotNull DefaultActionGroup createPopupActionGroup(@NotNull JComponent button,
                                                                      @NotNull DataContext context) {
             DefaultActionGroup group = new DefaultActionGroup();
-            DbSession session = explorer.sessionOf(config);
+            DbSession session = explorer.sessionOf(config());
             SchemaCatalog catalog = session == null ? null : session.catalog();
             if (catalog != null && !catalog.databaseCatalogs().isEmpty()) {
                 // Every database's schemas, under a separator per database.
@@ -687,7 +694,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
                 group.add(new DumbAwareAction("Connect to Load Schemas", null, AllIcons.Actions.Execute) {
                     @Override
                     public void actionPerformed(@NotNull AnActionEvent e) {
-                        explorer.withSession(config, session -> explorer.refreshTree());
+                        explorer.withSession(config(), session -> explorer.refreshTree());
                     }
                 });
                 return group;
@@ -705,12 +712,12 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
 
         @Override
         public void update(@NotNull AnActionEvent e) {
-            DbDialect dialect = config.dialect();
+            DbDialect dialect = config().dialect();
             String effective = effectiveSchema();
             String shown = effective != null ? effective : "<schema>";
             // With catalogs as schemas there is no database level to prefix.
-            String db = config.allDatabases() ? (database != null ? database : dialect.maintenanceDatabase())
-                    : config.database.isBlank() ? config.name : config.database;
+            String db = config().allDatabases() ? (database != null ? database : dialect.maintenanceDatabase())
+                    : config().database.isBlank() ? config().name : config().database;
             e.getPresentation().setText(dialect.namespaces() == NamespaceModel.SCHEMAS_ONLY ? shown : db + "." + shown);
             e.getPresentation().setIcon(IntellaDbIcons.SCHEMA);
         }

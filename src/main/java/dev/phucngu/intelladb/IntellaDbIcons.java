@@ -30,6 +30,8 @@ public final class IntellaDbIcons {
     public static final Icon VIEW = IconLoader.getIcon("/icons/dbView.svg", IntellaDbIcons.class);
     public static final Icon COLUMN = IconLoader.getIcon("/icons/dbColumn.svg", IntellaDbIcons.class);
     public static final Icon KEY = IconLoader.getIcon("/icons/dbKey.svg", IntellaDbIcons.class);
+    /** A column that is (part of) its table's primary key: the column icon with a key beside it. */
+    public static final Icon PRIMARY_KEY_COLUMN = IconLoader.getIcon("/icons/dbColumnKey.svg", IntellaDbIcons.class);
     public static final Icon FOREIGN_KEY = IconLoader.getIcon("/icons/dbForeignKey.svg", IntellaDbIcons.class);
     public static final Icon SEQUENCE = IconLoader.getIcon("/icons/dbSequence.svg", IntellaDbIcons.class);
     public static final Icon INDEX = IconLoader.getIcon("/icons/dbIndex.svg", IntellaDbIcons.class);

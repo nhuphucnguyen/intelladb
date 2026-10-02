@@ -805,11 +805,11 @@ public final class ConnectionTreePanel implements Disposable {
                     }
                 }
                 case ColumnEntry col -> {
-                    plain.append(col.name()).append(' ').append(col.type());
+                    plain.append(col.name()).append(' ').append(col.type()).append(col.pk() ? " (primary key)" : "");
                     append(col.name() + "  ", col.pk() ? SimpleTextAttributes.REGULAR_ATTRIBUTES
                             : SimpleTextAttributes.GRAYED_ATTRIBUTES);
                     append(col.type(), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES);
-                    setIcon(col.pk() ? IntellaDbIcons.KEY : IntellaDbIcons.COLUMN);
+                    setIcon(col.pk() ? IntellaDbIcons.PRIMARY_KEY_COLUMN : IntellaDbIcons.COLUMN);
                 }
                 case String s -> {
                     plain.append(s);

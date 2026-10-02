@@ -86,6 +86,8 @@ class MetadataLoaderPostgresTest {
         TableMeta pet = schema.tables().stream().filter(t -> t.name.equals("pet")).findFirst().orElseThrow();
 
         assertEquals(List.of("id"), pet.primaryKeyColumns());
+        assertEquals(List.of("id"), pet.columns.stream().filter(c -> c.primaryKey).map(c -> c.name).toList(),
+                "the tree marks key columns from ColumnMeta");
         assertEquals(List.of(new TableMeta.Key("pet_pkey", List.of("id"), true)), pet.keys);
         assertEquals(List.of(new TableMeta.ForeignKey("pet_owner_id_fkey", List.of("owner_id"),
                 SCHEMA, "owner", List.of("id"))), pet.foreignKeys);

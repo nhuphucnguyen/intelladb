@@ -153,6 +153,7 @@ public final class ResultsPanel extends JPanel {
         switch (result.kind) {
             case ROWS -> {
                 grid.setResult(result);
+                grid.setKeyColumns(primaryKeyColumns(result));
                 grid.getEmptyText().setText("No rows");
                 resultInfo = rowsInfo(result);
                 info.setText(resultInfo);
@@ -392,6 +393,24 @@ public final class ResultsPanel extends JPanel {
             }
         }
         return null;
+    }
+
+    /** Result columns (model indexes) that are their source table's primary key, when the catalog knows the table. */
+    private @NotNull java.util.Set<Integer> primaryKeyColumns(@NotNull SqlResult result) {
+        DbConfig config = host == null ? null : host.config();
+        SchemaCatalog.Schema source = config == null ? null : sourceTableMeta(config, result);
+        if (source == null) {
+            return java.util.Set.of();
+        }
+        List<String> key = source.tables().get(0).primaryKeyColumns();
+        java.util.Set<Integer> columns = new java.util.HashSet<>();
+        for (int c = 0; c < result.columns.size(); c++) {
+            String base = result.sourceColumn(c);
+            if (base != null && key.contains(base)) {
+                columns.add(c);
+            }
+        }
+        return columns;
     }
 
     // ------------------------------------------------------------------ editing

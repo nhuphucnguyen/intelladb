@@ -94,27 +94,39 @@ public interface DbDialect {
     /**
      * The dialog's Schemas tab: every schema, system ones included, on throwaway connections.
      * When the connection browses every database, every database's schemas, qualified as
-     * {@code database.schema} ({@link DbConfig#qualify}); databases the user may not
-     * connect to are left out.
+     * {@code database.schema} ({@link DbConfig#qualify}; see {@link #probeDatabaseSchemas}).
      */
     default @NotNull java.util.List<String> probeSchemaNames(@NotNull DbConfig config, @Nullable String password)
             throws Exception {
-        try (java.sql.Connection connection = DbSession.open(config, password, 5)) {
-            if (!config.allDatabases()) {
-                return dev.phucngu.intelladb.schema.MetadataLoader.schemaNames(connection, this);
-            }
+        if (config.allDatabases()) {
             java.util.List<String> names = new java.util.ArrayList<>();
+            probeDatabaseSchemas(config, password).forEach((database, schemas) ->
+                    schemas.forEach(schema -> names.add(DbConfig.qualify(database, schema))));
+            return names;
+        }
+        try (java.sql.Connection connection = DbSession.open(config, password, 5)) {
+            return dev.phucngu.intelladb.schema.MetadataLoader.schemaNames(connection, this);
+        }
+    }
+
+    /**
+     * The dialog's Schemas tab for a connection that browses every database: each database
+     * with its schemas (system ones included), in server order; databases the user may not
+     * connect to are left out.
+     */
+    default @NotNull java.util.Map<String, java.util.List<String>> probeDatabaseSchemas(
+            @NotNull DbConfig config, @Nullable String password) throws Exception {
+        java.util.Map<String, java.util.List<String>> byDatabase = new java.util.LinkedHashMap<>();
+        try (java.sql.Connection connection = DbSession.open(config, password, 5)) {
             for (String database : listDatabases(connection)) {
                 try (java.sql.Connection other = DbSession.open(config.withDatabase(database), password, 5)) {
-                    for (String schema : dev.phucngu.intelladb.schema.MetadataLoader.schemaNames(other, this)) {
-                        names.add(DbConfig.qualify(database, schema));
-                    }
+                    byDatabase.put(database, dev.phucngu.intelladb.schema.MetadataLoader.schemaNames(other, this));
                 } catch (java.sql.SQLException ignored) {
                     // no CONNECT privilege, or the database is being dropped
                 }
             }
-            return names;
         }
+        return byDatabase;
     }
 
     /** Database to connect to when only listing what the server has (the dialog's dropdown). */
