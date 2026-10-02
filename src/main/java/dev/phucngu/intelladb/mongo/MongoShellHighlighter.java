@@ -1,42 +1,35 @@
 package dev.phucngu.intelladb.mongo;
 
 import com.intellij.lexer.Lexer;
+import com.intellij.openapi.editor.DefaultLanguageHighlighterColors;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
-import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.fileTypes.SingleLazyInstanceSyntaxHighlighterFactory;
 import com.intellij.openapi.fileTypes.SyntaxHighlighter;
 import com.intellij.openapi.fileTypes.SyntaxHighlighterBase;
 import com.intellij.psi.tree.IElementType;
-import com.intellij.ui.JBColor;
 import dev.phucngu.intelladb.mongo.MongoShellLanguage.Tokens;
 import org.jetbrains.annotations.NotNull;
 
-import java.awt.Color;
-import java.awt.Font;
 import java.util.Map;
 
-/** Fixed, theme-brightness-aware colors for the MongoDB console, like the SQL console's highlighter. */
+/** Scheme-driven colors for the MongoDB console, like the SQL console's highlighter. */
 public final class MongoShellHighlighter extends SyntaxHighlighterBase {
 
-    private static final boolean BRIGHT = JBColor.isBright();
     private static final TextAttributesKey[] EMPTY = new TextAttributesKey[0];
 
     private static final Map<IElementType, TextAttributesKey> KEYS = Map.of(
-            Tokens.KEYWORD, key("KEYWORD", 0x0033B3, 0xCF8E6D, Font.PLAIN),
-            Tokens.STRING, key("STRING", 0x067D17, 0x6AAB73, Font.PLAIN),
-            Tokens.REGEX, key("REGEX", 0x264EFF, 0x42C3D4, Font.PLAIN),
-            Tokens.NUMBER, key("NUMBER", 0x1750EB, 0x2AACB8, Font.PLAIN),
-            Tokens.LINE_COMMENT, key("LINE_COMMENT", 0x8C8C8C, 0x7A7A7B, Font.ITALIC),
-            Tokens.BLOCK_COMMENT, key("BLOCK_COMMENT", 0x8C8C8C, 0x7A7A7B, Font.ITALIC),
-            Tokens.OPERATOR_NAME, key("OPERATOR_NAME", 0x871094, 0xC77DBB, Font.PLAIN),
-            Tokens.PROPERTY, key("PROPERTY", 0x871094, 0xC77DBB, Font.PLAIN),
-            Tokens.FUNCTION, key("FUNCTION", 0x00627A, 0x56A8F5, Font.PLAIN));
+            Tokens.KEYWORD, key("KEYWORD", DefaultLanguageHighlighterColors.KEYWORD),
+            Tokens.STRING, key("STRING", DefaultLanguageHighlighterColors.STRING),
+            Tokens.REGEX, key("REGEX", DefaultLanguageHighlighterColors.STRING),
+            Tokens.NUMBER, key("NUMBER", DefaultLanguageHighlighterColors.NUMBER),
+            Tokens.LINE_COMMENT, key("LINE_COMMENT", DefaultLanguageHighlighterColors.LINE_COMMENT),
+            Tokens.BLOCK_COMMENT, key("BLOCK_COMMENT", DefaultLanguageHighlighterColors.BLOCK_COMMENT),
+            Tokens.OPERATOR_NAME, key("OPERATOR_NAME", DefaultLanguageHighlighterColors.INSTANCE_FIELD),
+            Tokens.PROPERTY, key("PROPERTY", DefaultLanguageHighlighterColors.INSTANCE_FIELD),
+            Tokens.FUNCTION, key("FUNCTION", DefaultLanguageHighlighterColors.FUNCTION_CALL));
 
-    /** Deterministic colors: no theme defines these keys, so the fallback always applies (see IntellaSqlSyntaxHighlighter). */
-    @SuppressWarnings("deprecation")
-    private static @NotNull TextAttributesKey key(@NotNull String name, int light, int dark, int style) {
-        return TextAttributesKey.createTextAttributesKey("INTELLADB_MONGO_" + name,
-                new TextAttributes(new Color(BRIGHT ? light : dark), null, null, null, style));
+    private static @NotNull TextAttributesKey key(@NotNull String name, @NotNull TextAttributesKey fallback) {
+        return TextAttributesKey.createTextAttributesKey("INTELLADB_MONGO_" + name, fallback);
     }
 
     @Override

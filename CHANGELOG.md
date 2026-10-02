@@ -15,6 +15,11 @@
   tree and in the results grid's column headers (when the rows come from one known table) —
   and their tooltips say "primary key".
 
+### Fixed
+- **SQL and MongoDB console highlighting is readable in dark themes.** Colors come from the
+  active editor color scheme, so they follow theme switches (they used to keep the light
+  palette's dark blue keywords and black punctuation after switching to a dark theme).
+
 ## 0.3.0
 
 ### Added
