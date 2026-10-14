@@ -44,18 +44,26 @@ public final class MetadataLoader {
         Map<String, Map<String, TableBuilder>> builders = new TreeMap<>();
 
         int totalSchemas = 0;
-        try (ResultSet rs = catalogsAsSchemas ? meta.getCatalogs() : meta.getSchemas()) {
-            while (rs.next()) {
-                String schema = rs.getString(catalogsAsSchemas ? "TABLE_CAT" : "TABLE_SCHEM");
-                if (schema == null) {
-                    continue;
-                }
-                totalSchemas++;
-                boolean included = onlySchemas.isEmpty()
-                        ? showSystem || !dialect.isSystemSchema(schema)
-                        : onlySchemas.contains(schema);
-                if (included) {
+        List<String> dialectNames = dialect.namespaceNames(connection);
+        if (dialectNames != null) {
+            // The driver's metadata reports no namespaces (SQLite's does); the dialect names them.
+            totalSchemas = dialectNames.size();
+            for (String schema : dialectNames) {
+                if (included(dialect, onlySchemas, showSystem, schema)) {
                     builders.put(schema, new TreeMap<>());
+                }
+            }
+        } else {
+            try (ResultSet rs = catalogsAsSchemas ? meta.getCatalogs() : meta.getSchemas()) {
+                while (rs.next()) {
+                    String schema = rs.getString(catalogsAsSchemas ? "TABLE_CAT" : "TABLE_SCHEM");
+                    if (schema == null) {
+                        continue;
+                    }
+                    totalSchemas++;
+                    if (included(dialect, onlySchemas, showSystem, schema)) {
+                        builders.put(schema, new TreeMap<>());
+                    }
                 }
             }
         }
@@ -162,6 +170,10 @@ public final class MetadataLoader {
     /** Every schema of the connected database, system schemas included (for the connection dialog). */
     public static @NotNull List<String> schemaNames(@NotNull Connection connection, @NotNull DbDialect dialect)
             throws SQLException {
+        List<String> dialectNames = dialect.namespaceNames(connection);
+        if (dialectNames != null) {
+            return dialectNames;
+        }
         boolean catalogsAsSchemas = dialect.namespaces() == NamespaceModel.SCHEMAS_ONLY;
         List<String> names = new ArrayList<>();
         try (ResultSet rs = catalogsAsSchemas ? connection.getMetaData().getCatalogs()
@@ -172,6 +184,11 @@ public final class MetadataLoader {
         }
         names.sort(null);
         return names;
+    }
+
+    private static boolean included(@NotNull DbDialect dialect, @NotNull List<String> onlySchemas,
+                                    boolean showSystem, @NotNull String schema) {
+        return onlySchemas.isEmpty() ? showSystem || !dialect.isSystemSchema(schema) : onlySchemas.contains(schema);
     }
 
     private static TableMeta.@NotNull Kind kindOf(@NotNull String jdbcType) {

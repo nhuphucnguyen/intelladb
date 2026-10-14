@@ -1,16 +1,18 @@
 package dev.phucngu.intelladb;
 
 import com.intellij.openapi.util.IconLoader;
+import dev.phucngu.intelladb.connection.H2Dialect;
 import dev.phucngu.intelladb.connection.MariaDbDialect;
 import dev.phucngu.intelladb.connection.MySqlDialect;
 import dev.phucngu.intelladb.connection.PostgresDialect;
+import dev.phucngu.intelladb.connection.SQLiteDialect;
 import dev.phucngu.intelladb.mongo.MongoDialect;
 import javax.swing.Icon;
 
 /**
  * Icons for Intella DB. All are drawn for this plugin except the database product logos
  * (dbPostgres*, dbMysql*, dbMariadb*, dbMongodb*), which are the official PostgreSQL, MySQL, MariaDB
- * and MongoDB marks.
+ * and MongoDB marks; dbSqlite* and dbH2* are original cylinders in a product colour, not the marks.
  */
 public final class IntellaDbIcons {
     public static final Icon TOOL_WINDOW = IconLoader.getIcon("/icons/dbToolWindow.svg", IntellaDbIcons.class);
@@ -24,6 +26,10 @@ public final class IntellaDbIcons {
     public static final Icon MARIADB_CONNECTED = IconLoader.getIcon("/icons/dbMariadbConnected.svg", IntellaDbIcons.class);
     public static final Icon MONGODB = IconLoader.getIcon("/icons/dbMongodb.svg", IntellaDbIcons.class);
     public static final Icon MONGODB_CONNECTED = IconLoader.getIcon("/icons/dbMongodbConnected.svg", IntellaDbIcons.class);
+    public static final Icon SQLITE = IconLoader.getIcon("/icons/dbSqlite.svg", IntellaDbIcons.class);
+    public static final Icon SQLITE_CONNECTED = IconLoader.getIcon("/icons/dbSqliteConnected.svg", IntellaDbIcons.class);
+    public static final Icon H2 = IconLoader.getIcon("/icons/dbH2.svg", IntellaDbIcons.class);
+    public static final Icon H2_CONNECTED = IconLoader.getIcon("/icons/dbH2Connected.svg", IntellaDbIcons.class);
     public static final Icon DATABASE = IconLoader.getIcon("/icons/dbDatabase.svg", IntellaDbIcons.class);
     public static final Icon SCHEMA = IconLoader.getIcon("/icons/dbSchema.svg", IntellaDbIcons.class);
     public static final Icon TABLE = IconLoader.getIcon("/icons/dbTable.svg", IntellaDbIcons.class);
@@ -49,6 +55,8 @@ public final class IntellaDbIcons {
             case MySqlDialect.ID -> connected ? MYSQL_CONNECTED : MYSQL;
             case MariaDbDialect.ID -> connected ? MARIADB_CONNECTED : MARIADB;
             case MongoDialect.ID -> connected ? MONGODB_CONNECTED : MONGODB;
+            case SQLiteDialect.ID -> connected ? SQLITE_CONNECTED : SQLITE;
+            case H2Dialect.ID -> connected ? H2_CONNECTED : H2;
             default -> connected ? CONNECTION_CONNECTED : CONNECTION;
         };
     }

@@ -11,7 +11,7 @@ import java.util.stream.Collectors;
 public final class Dialects {
 
     private static final List<DbDialect> ALL = List.of(new PostgresDialect(), new MySqlDialect(), new MariaDbDialect(),
-            new dev.phucngu.intelladb.mongo.MongoDialect());
+            new SQLiteDialect(), new H2Dialect(), new dev.phucngu.intelladb.mongo.MongoDialect());
     private static final Map<String, DbDialect> BY_ID =
             ALL.stream().collect(Collectors.toUnmodifiableMap(DbDialect::id, Function.identity()));
 

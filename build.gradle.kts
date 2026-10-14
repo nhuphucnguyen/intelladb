@@ -30,6 +30,9 @@ dependencies {
     implementation("org.mariadb.jdbc:mariadb-java-client:3.5.10")
     // MongoDB has no JDBC; its own sync driver (Apache-2.0) backs the MongoDB dialect.
     implementation("org.mongodb:mongodb-driver-sync:5.13.0")
+    // Embedded databases (Apache-2.0 and EPL-2.0/MPL-2.0 dual; both fine to bundle).
+    implementation("org.xerial:sqlite-jdbc:3.50.3.0")
+    implementation("com.h2database:h2:2.3.232")
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

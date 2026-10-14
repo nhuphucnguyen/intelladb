@@ -35,6 +35,16 @@ class DriverImportGuardTest {
         assertEquals(List.of(), offenders("org.bson", "Mongo"));
     }
 
+    @Test
+    void onlySqliteFilesReferenceTheXerialDriver() throws IOException {
+        assertEquals(List.of(), offenders("org.sqlite", "SQLite"));
+    }
+
+    @Test
+    void onlyH2FilesReferenceTheH2Driver() throws IOException {
+        assertEquals(List.of(), offenders("org.h2", "H2"));
+    }
+
     private static List<String> offenders(String packagePrefix, String filePrefix) throws IOException {
         try (Stream<Path> files = Files.walk(MAIN)) {
             return files.filter(p -> p.toString().endsWith(".java"))
