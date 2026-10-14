@@ -192,6 +192,16 @@ public final class ConnectionDialog extends DialogWrapper {
      * starts a new (project) connection instead.
      */
     public ConnectionDialog(@NotNull Project project, @Nullable DbConfig select) {
+        this(project, select, null);
+    }
+
+    /**
+     * As {@link #ConnectionDialog(Project, DbConfig)}; a non-null {@code newDialectId}
+     * additionally drafts a new connection of that dialect and selects it — the "+"
+     * quick-create entries.
+     */
+    public ConnectionDialog(@NotNull Project project, @Nullable DbConfig select,
+                            @Nullable String newDialectId) {
         super(project);
         this.project = project;
         this.manager = ConnectionManager.getInstance(project);
@@ -211,7 +221,9 @@ public final class ConnectionDialog extends DialogWrapper {
         }
         init();
         wireListeners();
-        if (selected == null && (select == null || drafts.isEmpty())) {
+        if (newDialectId != null) {
+            selected = newDraft(Dialects.byId(newDialectId));
+        } else if (selected == null && (select == null || drafts.isEmpty())) {
             selected = newDraft(Dialects.all().get(0));
         } else if (selected == null) {
             selected = drafts.get(0);

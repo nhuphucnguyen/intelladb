@@ -4,10 +4,13 @@ import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.ide.DataManager;
 import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
+import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
+import com.intellij.openapi.actionSystem.IdeActions;
+import com.intellij.openapi.actionSystem.ShortcutSet;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.project.Project;
@@ -18,6 +21,7 @@ import com.intellij.ui.ClientProperty;
 import com.intellij.ui.ColoredTreeCellRenderer;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.SimpleTextAttributes;
+import com.intellij.ui.TreeSpeedSearch;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.tree.ui.ClassicPainter;
@@ -104,6 +108,12 @@ public final class ConnectionTreePanel implements Disposable {
         boolean isGroup() {
             return this == DATABASE_OBJECTS || this == SERVER_OBJECTS;
         }
+
+        /** Detail folders live under a table; the flat view only flattens schema-level folders. */
+        boolean isTableDetail() {
+            return this == COLUMNS || this == KEYS || this == FOREIGN_KEYS
+                    || this == INDEXES || this == CHECKS;
+        }
     }
 
     public enum ObjectKind {
@@ -124,27 +134,51 @@ public final class ConnectionTreePanel implements Disposable {
     private final DbExplorerPanel explorer;
     private final ConnectionManager manager;
     private final JPanel wrapper = new JPanel(new BorderLayout());
-    private final JBLabel hint = new JBLabel("  No connections yet — use + to add one");
+    private final JBLabel hint = new JBLabel("  No data sources yet — use + to add one");
     private final Tree tree;
     private DefaultTreeModel model;
     /** configId -> "connecting" | "error:<message>"; connected state is derived from the manager. */
     private final Map<String, String> transientState = new HashMap<>();
+    /** The eye menu's flags; the model and renderer both read them. */
+    private TreeViewOptions options = TreeViewOptions.DEFAULTS;
 
     public ConnectionTreePanel(@NotNull Project project, @NotNull DbExplorerPanel explorer) {
         this.project = project;
         this.explorer = explorer;
         this.manager = ConnectionManager.getInstance(project);
+        this.options = TreeViewOptions.load(project);
 
         model = new DefaultTreeModel(new DefaultMutableTreeNode());
-        tree = new Tree(model);
+        tree = new Tree(model) {
+            @Override
+            public String convertValueToText(Object value, boolean selected, boolean expanded,
+                                             boolean leaf, int row, boolean hasFocus) {
+                return searchableText(value);
+            }
+        };
         tree.setRootVisible(false);
         tree.setShowsRootHandles(true);
         tree.setCellRenderer(new Renderer());
         // Vertical indent guides regardless of the IDE-wide appearance setting.
         ClientProperty.put(tree, Control.Painter.KEY, new ClassicPainter(true, null, null, null));
         javax.swing.ToolTipManager.sharedInstance().registerComponent(tree);
-        tree.getEmptyText().setText("No connections yet — click + to add one");
+        tree.getEmptyText().setText("No data sources yet — click + to add one");
         tree.addMouseListener(new MouseHandler());
+        // Typing finds nodes; the searchable text comes from the same labels the renderer shows.
+        new TreeSpeedSearch(tree);
+        // IntelliJ binds Edit Data to EditSource (F4) and Go to DDL to Go to Declaration.
+        registerTreeShortcut(IdeActions.ACTION_EDIT_SOURCE, () -> {
+            TableRef table = selectedTable();
+            if (table != null) {
+                viewTableData(table);
+            }
+        });
+        registerTreeShortcut(IdeActions.ACTION_GOTO_DECLARATION, () -> {
+            TableRef table = selectedTable();
+            if (table != null) {
+                explorer.openDdl(table);
+            }
+        });
 
         dev.phucngu.intelladb.connection.SessionOpener.getInstance(project)
                 .addListener(new dev.phucngu.intelladb.connection.SessionOpener.Listener() {
@@ -172,6 +206,51 @@ public final class ConnectionTreePanel implements Disposable {
 
     public @NotNull Tree tree() {
         return tree;
+    }
+
+    /** Reuses a registered action's shortcuts (EditSource = F4, Go to Declaration = ⌘B). */
+    private void registerTreeShortcut(@NotNull String actionId, @NotNull Runnable runnable) {
+        AnAction keyAction = new AnAction() {
+            @Override
+            public void actionPerformed(@NotNull AnActionEvent e) {
+                runnable.run();
+            }
+        };
+        AnAction source = ActionManager.getInstance().getAction(actionId);
+        if (source != null) {
+            keyAction.registerCustomShortcutSet(source.getShortcutSet(), tree);
+        }
+    }
+
+    /** The text speed search matches — the same labels the renderer shows. */
+    static @NotNull String searchableText(@Nullable Object value) {
+        if (!(value instanceof DefaultMutableTreeNode node) || node.getUserObject() == null) {
+            return value == null ? "" : value.toString();
+        }
+        return switch (node.getUserObject()) {
+            case ConfigEntry c -> {
+                DbConfig config = c.config();
+                yield config.name.isEmpty() ? config.describe() : config.name;
+            }
+            case DatabaseEntry d -> d.name();
+            case SchemaEntry s -> s.name();
+            case FolderEntry f -> f.config().dialect().folderLabel(f.folder().label);
+            case TableEntry t -> t.meta().name;
+            case ColumnEntry col -> col.name() + " " + col.type();
+            case ObjectEntry o -> o.name() + " " + o.detail();
+            case String s -> s;
+            default -> node.getUserObject().toString();
+        };
+    }
+
+    public @NotNull TreeViewOptions viewOptions() {
+        return options;
+    }
+
+    /** Applies new eye-menu flags and rebuilds the tree with them. */
+    public void setViewOptions(@NotNull TreeViewOptions options) {
+        this.options = options;
+        rebuild();
     }
 
     public void setHint(@NotNull String text) {
@@ -267,51 +346,80 @@ public final class ConnectionTreePanel implements Disposable {
         }
     }
 
-    private static void appendTables(@NotNull DefaultMutableTreeNode schemaNode, @NotNull DbConfig config,
-                                     @Nullable String database, @NotNull SchemaCatalog.Schema schema,
-                                     @NotNull Folder folder,
-                                     TableMeta.@NotNull Kind kind) {
+    private void appendTables(@NotNull DefaultMutableTreeNode schemaNode, @NotNull DbConfig config,
+                              @Nullable String database, @NotNull SchemaCatalog.Schema schema,
+                              @NotNull Folder folder,
+                              TableMeta.@NotNull Kind kind) {
         List<TableMeta> tables = schema.tablesOf(kind);
         if (tables.isEmpty()) {
+            if (options.emptyGroups() && options.groupByKind()) {
+                schemaNode.add(folderNode(config, folder, schema.name(), 0));
+            }
+            return;
+        }
+        if (!options.groupByKind()) {
+            // Flat view: objects hang directly off the schema.
+            for (TableMeta table : tables) {
+                schemaNode.add(tableNode(config, database, schema.name(), table));
+            }
             return;
         }
         DefaultMutableTreeNode folderNode = folderNode(config, folder, schema.name(), tables.size());
         schemaNode.add(folderNode);
         for (TableMeta table : tables) {
-            DefaultMutableTreeNode tableNode = new DefaultMutableTreeNode(new TableEntry(config, database, schema.name(), table));
-            folderNode.add(tableNode);
-            String owner = schema.name() + "." + table.name;
-            if (!table.columns.isEmpty()) {
-                DefaultMutableTreeNode columns = folderNode(config, Folder.COLUMNS, owner, table.columns.size());
-                tableNode.add(columns);
-                for (dev.phucngu.intelladb.schema.ColumnMeta column : table.columns) {
-                    columns.add(new DefaultMutableTreeNode(new ColumnEntry(
-                            config, schema.name(), table.name, column.name, column.typeName, column.primaryKey), false));
-                }
-            }
-            appendObjects(tableNode, config, Folder.KEYS, owner, table.keys.stream()
-                    .map(k -> new ObjectEntry(config, k.primary() ? ObjectKind.PRIMARY_KEY : ObjectKind.UNIQUE_KEY,
-                            k.name(), "(" + String.join(", ", k.columns()) + ")"))
-                    .toList());
-            appendObjects(tableNode, config, Folder.FOREIGN_KEYS, owner, table.foreignKeys.stream()
-                    .map(fk -> new ObjectEntry(config, ObjectKind.FOREIGN_KEY, fk.name(),
-                            "(" + String.join(", ", fk.columns()) + ") → "
-                                    + (fk.refSchema().equals(schema.name()) ? "" : fk.refSchema() + ".")
-                                    + fk.refTable() + "(" + String.join(", ", fk.refColumns()) + ")"))
-                    .toList());
-            appendObjects(tableNode, config, Folder.INDEXES, owner, table.indexes.stream()
-                    .map(i -> new ObjectEntry(config, ObjectKind.INDEX, i.name(),
-                            "(" + String.join(", ", i.columns()) + ")" + (i.unique() ? " UNIQUE" : "")))
-                    .toList());
-            appendObjects(tableNode, config, Folder.CHECKS, owner, table.checks.stream()
-                    .map(c -> new ObjectEntry(config, ObjectKind.CHECK, c.name(), c.definition()))
-                    .toList());
+            folderNode.add(tableNode(config, database, schema.name(), table));
         }
     }
 
-    private static void appendObjects(@NotNull DefaultMutableTreeNode parent, @NotNull DbConfig config,
-                                      @NotNull Folder folder, @NotNull String owner, @NotNull List<ObjectEntry> objects) {
+    /** A table node, plus its columns/keys/indexes folders when details are shown. */
+    private @NotNull DefaultMutableTreeNode tableNode(@NotNull DbConfig config, @Nullable String database,
+                                                      @NotNull String schema, @NotNull TableMeta table) {
+        DefaultMutableTreeNode tableNode =
+                new DefaultMutableTreeNode(new TableEntry(config, database, schema, table));
+        if (!options.tableDetails()) {
+            return tableNode;
+        }
+        String owner = schema + "." + table.name;
+        if (!table.columns.isEmpty()) {
+            DefaultMutableTreeNode columns = folderNode(config, Folder.COLUMNS, owner, table.columns.size());
+            tableNode.add(columns);
+            for (dev.phucngu.intelladb.schema.ColumnMeta column : table.columns) {
+                columns.add(new DefaultMutableTreeNode(new ColumnEntry(
+                        config, schema, table.name, column.name, column.typeName, column.primaryKey), false));
+            }
+        }
+        appendObjects(tableNode, config, Folder.KEYS, owner, table.keys.stream()
+                .map(k -> new ObjectEntry(config, k.primary() ? ObjectKind.PRIMARY_KEY : ObjectKind.UNIQUE_KEY,
+                        k.name(), "(" + String.join(", ", k.columns()) + ")"))
+                .toList());
+        appendObjects(tableNode, config, Folder.FOREIGN_KEYS, owner, table.foreignKeys.stream()
+                .map(fk -> new ObjectEntry(config, ObjectKind.FOREIGN_KEY, fk.name(),
+                        "(" + String.join(", ", fk.columns()) + ") → "
+                                + (fk.refSchema().equals(schema) ? "" : fk.refSchema() + ".")
+                                + fk.refTable() + "(" + String.join(", ", fk.refColumns()) + ")"))
+                .toList());
+        appendObjects(tableNode, config, Folder.INDEXES, owner, table.indexes.stream()
+                .map(i -> new ObjectEntry(config, ObjectKind.INDEX, i.name(),
+                        "(" + String.join(", ", i.columns()) + ")" + (i.unique() ? " UNIQUE" : "")))
+                .toList());
+        appendObjects(tableNode, config, Folder.CHECKS, owner, table.checks.stream()
+                .map(c -> new ObjectEntry(config, ObjectKind.CHECK, c.name(), c.definition()))
+                .toList());
+        return tableNode;
+    }
+
+    private void appendObjects(@NotNull DefaultMutableTreeNode parent, @NotNull DbConfig config,
+                               @NotNull Folder folder, @NotNull String owner, @NotNull List<ObjectEntry> objects) {
         if (objects.isEmpty()) {
+            if (options.emptyGroups() && options.groupByKind() && !folder.isTableDetail()) {
+                parent.add(folderNode(config, folder, owner, 0));
+            }
+            return;
+        }
+        if (!options.groupByKind() && !folder.isTableDetail()) {
+            for (ObjectEntry object : objects) {
+                parent.add(new DefaultMutableTreeNode(object, false));
+            }
             return;
         }
         DefaultMutableTreeNode folderNode = folderNode(config, folder, owner, objects.size());
@@ -394,7 +502,7 @@ public final class ConnectionTreePanel implements Disposable {
     private void updateHint() {
         List<DbConfig> configs = manager.configs();
         if (configs.isEmpty()) {
-            setHint("No connections yet — use + to add one");
+            setHint("No data sources yet — use + to add one");
         } else {
             long connected = configs.stream().filter(c -> manager.session(c.id) != null).count();
             setHint(configs.size() + " connection(s) · " + connected + " connected");
@@ -489,7 +597,21 @@ public final class ConnectionTreePanel implements Disposable {
     // ------------------------------------------------------------------ actions
 
     public void addConnection() {
-        ConnectionDialog dialog = new ConnectionDialog(project, null);
+        addConnection(null);
+    }
+
+    /** The "+" quick-create: opens the Data Sources dialog with a new connection of the dialect drafted. */
+    public void addConnection(@Nullable String dialectId) {
+        showDataSourcesDialog(null, dialectId);
+    }
+
+    /**
+     * Opens the Data Sources dialog — IntelliJ's "Properties…" — with {@code select}'s
+     * entry selected and optionally a new {@code newDialectId} connection drafted.
+     * Refreshes the tree when the dialog applies changes.
+     */
+    public void showDataSourcesDialog(@Nullable DbConfig select, @Nullable String newDialectId) {
+        ConnectionDialog dialog = new ConnectionDialog(project, select, newDialectId);
         if (dialog.showAndGet()) {
             explorer.refreshTree();
         }
@@ -564,7 +686,12 @@ public final class ConnectionTreePanel implements Disposable {
         });
     }
 
-    private void openConsole(@NotNull DbConfig config) {
+    public @NotNull DbExplorerPanel explorer() {
+        return explorer;
+    }
+
+    /** Opens the connection's console (connecting first if needed), as the toolbar's SQL Console does. */
+    public void openConsoleFor(@NotNull DbConfig config) {
         openConsole(config, null, null);
     }
 
@@ -580,7 +707,7 @@ public final class ConnectionTreePanel implements Disposable {
         }
     }
 
-    private void openTableData(@NotNull TableRef table) {
+    public void viewTableData(@NotNull TableRef table) {
         if (manager.session(table.config().id) != null) {
             explorer.openTableData(table);
         } else {
@@ -620,7 +747,7 @@ public final class ConnectionTreePanel implements Disposable {
                     com.intellij.icons.AllIcons.Actions.Refresh, this::refreshSelected));
             group.addSeparator();
             group.add(action("New SQL Console", "Open a SQL console",
-                    com.intellij.icons.AllIcons.Nodes.Console, () -> openConsole(config)));
+                    com.intellij.icons.AllIcons.Nodes.Console, () -> openConsoleFor(config)));
             group.addSeparator();
             group.add(action("Edit Connection…", "Edit connection settings",
                     com.intellij.icons.AllIcons.Actions.Edit, () -> editConnection(config)));
@@ -647,7 +774,9 @@ public final class ConnectionTreePanel implements Disposable {
             group.add(action("New SQL Console", "Open a SQL console",
                     com.intellij.icons.AllIcons.Nodes.Console,
                     () -> openConsole(config, schemaEntry.database(), schemaEntry.name())));
-            group.add(action("Copy Schema DDL", "Copy CREATE TABLE statements",
+            group.addSeparator();
+            DefaultActionGroup scripts = new DefaultActionGroup("SQL Scripts", true);
+            scripts.add(action("Copy Schema DDL", "Copy CREATE TABLE statements",
                     com.intellij.icons.AllIcons.Actions.Copy, () -> {
                         DbSession session = manager.session(config.id);
                         if (session != null && session.catalog() != null) {
@@ -659,18 +788,29 @@ public final class ConnectionTreePanel implements Disposable {
                                     new SchemaCatalog.Schema(schemaEntry.name(), tables))), config.dialect(), "Schema");
                         }
                     }));
+            group.add(scripts);
         } else if (entry instanceof TableEntry tableEntry) {
             TableRef ref = tableEntry.ref();
-            group.add(action("View Data", "Preview first 200 rows",
-                    com.intellij.icons.AllIcons.Actions.Preview, () -> openTableData(ref)));
-            group.add(action("New SQL Console", "Open a SQL console",
-                    com.intellij.icons.AllIcons.Nodes.Console, () -> openConsole(tableEntry.config(), tableEntry.database(),
-                            tableEntry.schema())));
+            DefaultActionGroup navigate = new DefaultActionGroup("Navigate", true);
+            navigate.add(action("Edit Data", "Preview and edit the table's rows",
+                    com.intellij.icons.AllIcons.Actions.Preview, () -> viewTableData(ref)));
+            navigate.add(action("Go to DDL", "Open the CREATE statement in an editor tab",
+                    com.intellij.icons.AllIcons.Actions.EditSource, () -> explorer.openDdl(ref)));
+            navigate.add(action("SQL Console", "Open a console scoped to this table's schema",
+                    com.intellij.icons.AllIcons.Nodes.Console,
+                    () -> openConsole(tableEntry.config(), tableEntry.database(), tableEntry.schema())));
+            group.add(navigate);
             group.addSeparator();
-            group.add(action("Copy Table DDL", "Copy CREATE TABLE statement",
+            DefaultActionGroup scripts = new DefaultActionGroup("SQL Scripts", true);
+            scripts.add(action("Copy Table DDL", "Copy the CREATE TABLE statement",
                     com.intellij.icons.AllIcons.Actions.Copy, () -> copyDdl(new SchemaCatalog(List.of(
                             new SchemaCatalog.Schema(tableEntry.schema(), List.of(tableEntry.meta())))),
                             tableEntry.config().dialect(), "Table")));
+            scripts.add(action("Copy Qualified Name", "Copy the schema-qualified table name",
+                    com.intellij.icons.AllIcons.Actions.Copy,
+                    () -> CopyPasteManager.getInstance().setContents(new StringSelection(ref.qualifiedName()))));
+            group.add(scripts);
+            group.addSeparator();
             group.add(action("Ask AI about this table", "Explain this table with the AI assistant",
                     IntellaDbIcons.AI, () -> AiChatPanel.openInExplorer(project,
                             "Explain the table " + tableEntry.schema() + "."
@@ -678,6 +818,10 @@ public final class ConnectionTreePanel implements Disposable {
         } else if (entry instanceof ColumnEntry columnEntry) {
             group.add(action("Copy Name", "Copy column name", com.intellij.icons.AllIcons.Actions.Copy,
                     () -> CopyPasteManager.getInstance().setContents(new StringSelection(columnEntry.name()))));
+            group.add(action("Copy Qualified Name", "Copy schema.table.column",
+                    com.intellij.icons.AllIcons.Actions.Copy,
+                    () -> CopyPasteManager.getInstance().setContents(new StringSelection(
+                            columnEntry.schema() + "." + columnEntry.table() + "." + columnEntry.name()))));
         } else if (entry instanceof ObjectEntry objectEntry) {
             group.add(action("Copy Name", "Copy the object name", com.intellij.icons.AllIcons.Actions.Copy,
                     () -> CopyPasteManager.getInstance().setContents(new StringSelection(objectEntry.name()))));
@@ -776,8 +920,10 @@ public final class ConnectionTreePanel implements Disposable {
                         setIcon(f.folder() == Folder.SERVER_OBJECTS ? AllIcons.Nodes.Services : AllIcons.Nodes.ConfigFolder);
                     } else {
                         setIcon(AllIcons.Nodes.Folder);
-                        plain.append(' ').append(f.count());
-                        append("  " + f.count(), SimpleTextAttributes.GRAYED_ATTRIBUTES);
+                        if (options.objectCounts()) {
+                            plain.append(' ').append(f.count());
+                            append("  " + f.count(), SimpleTextAttributes.GRAYED_ATTRIBUTES);
+                        }
                     }
                 }
                 case ObjectEntry o -> {
@@ -808,7 +954,9 @@ public final class ConnectionTreePanel implements Disposable {
                     plain.append(col.name()).append(' ').append(col.type()).append(col.pk() ? " (primary key)" : "");
                     append(col.name() + "  ", col.pk() ? SimpleTextAttributes.REGULAR_ATTRIBUTES
                             : SimpleTextAttributes.GRAYED_ATTRIBUTES);
-                    append(col.type(), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES);
+                    if (options.columnTypes()) {
+                        append(col.type(), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES);
+                    }
                     setIcon(col.pk() ? IntellaDbIcons.PRIMARY_KEY_COLUMN : IntellaDbIcons.COLUMN);
                 }
                 case String s -> {
@@ -860,12 +1008,12 @@ public final class ConnectionTreePanel implements Disposable {
                 Object entry = selectedEntry();
                 if (entry instanceof ConfigEntry config) {
                     if (manager.session(config.config().id) != null) {
-                        openConsole(config.config());
+                        openConsoleFor(config.config());
                     } else {
                         connect(config.config());
                     }
                 } else if (entry instanceof TableEntry table) {
-                    openTableData(table.ref());
+                    viewTableData(table.ref());
                 }
             }
         }

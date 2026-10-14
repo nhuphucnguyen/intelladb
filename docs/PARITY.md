@@ -44,9 +44,15 @@ Legend: ✅ done · 🟡 partial · ❌ missing
 | Tree: databases/schemas/tables/columns + PK markers | ✅ | `ConnectionTreePanel` |
 | Extra object kinds (routines, sequences, indexes, keys, checks…) | ✅ | `CatalogObjects` (PG/MySQL) |
 | Refresh preserving expansion/selection | ✅ | |
+| Toolbar grammar `[+ ▾][Properties…][Refresh][Disconnect][Console][Edit Data F4][DDL ⌘B][Eye ▾]` | ✅ | `ui/actions/explorer/*` |
+| Eye menu view options (groups/counts/details) | ✅ | `TreeViewOptions`, persisted per project |
+| Speed search in the tree | ✅ | `TreeSpeedSearch` over the rendered labels |
+| Onboarding empty state (quick-create buttons) | ✅ | shown while there are no data sources |
+| Context menus as named popups (Navigate ▾, SQL Scripts ▾) | ✅ | |
 | Copy DDL (table/schema) | ✅ | `DdlGenerator` |
+| Go to DDL as a read-only editor tab | ✅ | `DbExplorerPanel.openDdl`, ⌘B on tree nodes |
 | DDL for every object kind (routines, indexes…) | ❌ | |
-| Object search (tree + everywhere) | ❌ | |
+| Object search (tree + everywhere) | 🟡 | tree speed search; no Everywhere/Go to Database Object |
 | Quick documentation popup | ❌ | |
 | Schema compare | ❌ | |
 | Export database as SQL script | ❌ | |

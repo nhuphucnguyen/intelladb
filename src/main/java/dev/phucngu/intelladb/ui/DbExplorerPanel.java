@@ -1,42 +1,69 @@
 package dev.phucngu.intelladb.ui;
 
-import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.ActionToolbar;
-import com.intellij.openapi.actionSystem.AnAction;
-import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
+import com.intellij.openapi.fileEditor.FileEditorManager;
+import com.intellij.openapi.fileTypes.PlainTextFileType;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.Messages;
-import com.intellij.openapi.ui.SimpleToolWindowPanel;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.Key;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.testFramework.LightVirtualFile;
+import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBScrollPane;
+import com.intellij.openapi.ui.SimpleToolWindowPanel;
 import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.UIUtil;
 import dev.phucngu.intelladb.IntellaDbIcons;
 import dev.phucngu.intelladb.connection.ConnectionManager;
 import dev.phucngu.intelladb.connection.DbConfig;
 import dev.phucngu.intelladb.connection.DbSession;
+import dev.phucngu.intelladb.schema.SchemaCatalog;
 import dev.phucngu.intelladb.schema.TableMeta;
+import dev.phucngu.intelladb.ui.actions.explorer.AddDataSourceGroup;
+import dev.phucngu.intelladb.ui.actions.explorer.DisconnectAction;
+import dev.phucngu.intelladb.ui.actions.explorer.EditDataAction;
+import dev.phucngu.intelladb.ui.actions.explorer.GoToDdlAction;
+import dev.phucngu.intelladb.ui.actions.explorer.OpenConsoleAction;
+import dev.phucngu.intelladb.ui.actions.explorer.OpenDataSourcesDialogAction;
+import dev.phucngu.intelladb.ui.actions.explorer.RefreshConnectionAction;
+import dev.phucngu.intelladb.ui.actions.explorer.ViewOptionsAction;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.JButton;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
+import java.awt.Font;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
+import java.util.List;
 import java.util.function.Consumer;
 
 /**
  * "Explorer" tab of the DB Explorer tool window: the connection tree, full width, with
- * database actions only. The AI chat is a sibling tab of the tool window (not a split
- * inside this panel); consoles and data grids open as editor tabs.
+ * database actions only — IntelliJ's grammar of [+ ▾ · Properties… | Refresh · Disconnect |
+ * Console · Edit Data · Go to DDL | Eye ▾]. The AI chat is a sibling tab of the tool window
+ * (not a split inside this panel); consoles and data grids open as editor tabs.
  */
 public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disposable {
+
+    private static final Key<String> DDL_CONFIG_KEY = Key.create("IntellaDb.Ddl.configId");
 
     private final Project project;
     private final ConnectionManager manager;
     private final ConnectionTreePanel treePanel;
     /** Owned here so its lifetime follows the explorer; shown as its own tool-window tab. */
     private final AiChatPanel aiPanel;
+    private final JBScrollPane treeScroll;
+    private final JComponent emptyPanel;
 
     public DbExplorerPanel(@NotNull Project project) {
         super(true, true);
@@ -44,145 +71,88 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         this.manager = ConnectionManager.getInstance(project);
         this.treePanel = new ConnectionTreePanel(project, this);
         this.aiPanel = new AiChatPanel(project);
+        this.treeScroll = new JBScrollPane(treePanel.tree());
+        this.treeScroll.setBorder(JBUI.Borders.empty());
+        this.emptyPanel = createEmptyPanel();
 
         setToolbar(createToolbar().getComponent());
-
-        JBScrollPane treeScroll = new JBScrollPane(treePanel.tree());
-        treeScroll.setBorder(JBUI.Borders.empty());
-        setContent(treeScroll);
+        updateEmptyState();
 
         manager.addListener(this::refreshTree);
         Disposer.register(this, treePanel);
     }
 
+    /**
+     * IntelliJ's toolbar grammar: [+ New] [Properties] | [Refresh] [Disconnect] |
+     * [Console] [Edit Data] [DDL] | [Eye options] — four icon clusters, everything
+     * else lives in the tree's context menus.
+     */
     private ActionToolbar createToolbar() {
         DefaultActionGroup group = new DefaultActionGroup();
-        group.add(new AnAction("Add Connection", "Add a new database connection", AllIcons.General.Add) {
-            @Override
-            public void actionPerformed(@NotNull AnActionEvent e) {
-                treePanel.addConnection();
-            }
-
-            @Override
-            public @NotNull ActionUpdateThread getActionUpdateThread() {
-                return ActionUpdateThread.EDT;
-            }
-        });
-        group.add(new AnAction("Connect", "Connect the selected connection", AllIcons.Actions.Execute) {
-            @Override
-            public void actionPerformed(@NotNull AnActionEvent e) {
-                treePanel.connectSelected();
-            }
-
-            @Override
-            public @NotNull ActionUpdateThread getActionUpdateThread() {
-                return ActionUpdateThread.EDT;
-            }
-
-            @Override
-            public void update(@NotNull AnActionEvent e) {
-                e.getPresentation().setEnabled(treePanel.selectedConfig() != null);
-            }
-        });
-        group.add(new AnAction("Disconnect", "Disconnect the selected connection", AllIcons.Actions.Suspend) {
-            @Override
-            public void actionPerformed(@NotNull AnActionEvent e) {
-                treePanel.disconnectSelected();
-            }
-
-            @Override
-            public @NotNull ActionUpdateThread getActionUpdateThread() {
-                return ActionUpdateThread.EDT;
-            }
-
-            @Override
-            public void update(@NotNull AnActionEvent e) {
-                e.getPresentation().setEnabled(treePanel.selectedConfig() != null);
-            }
-        });
+        group.add(new AddDataSourceGroup(project, treePanel));
+        group.add(new OpenDataSourcesDialogAction(project, treePanel));
         group.addSeparator();
-        group.add(new AnAction("Refresh", "Reload the schema of the selected connection", AllIcons.Actions.Refresh) {
-            @Override
-            public void actionPerformed(@NotNull AnActionEvent e) {
-                treePanel.refreshSelected();
-            }
-
-            @Override
-            public @NotNull ActionUpdateThread getActionUpdateThread() {
-                return ActionUpdateThread.EDT;
-            }
-
-            @Override
-            public void update(@NotNull AnActionEvent e) {
-                e.getPresentation().setEnabled(treePanel.selectedConfig() != null);
-            }
-        });
-        group.add(new AnAction("Make Global", "Share the selected connection with all projects",
-                IntellaDbIcons.MAKE_GLOBAL) {
-            @Override
-            public void actionPerformed(@NotNull AnActionEvent e) {
-                DbConfig config = treePanel.selectedConfig();
-                if (config != null) {
-                    manager.setGlobal(config.id, !manager.isGlobal(config.id));
-                }
-            }
-
-            @Override
-            public @NotNull ActionUpdateThread getActionUpdateThread() {
-                return ActionUpdateThread.EDT;
-            }
-
-            @Override
-            public void update(@NotNull AnActionEvent e) {
-                DbConfig config = treePanel.selectedConfig();
-                boolean global = config != null && manager.isGlobal(config.id);
-                e.getPresentation().setEnabled(config != null);
-                e.getPresentation().setText(global ? "Make Project" : "Make Global");
-                e.getPresentation().setDescription(global ? "Keep the selected connection in this project only"
-                        : "Share the selected connection with all projects");
-                e.getPresentation().setIcon(global ? IntellaDbIcons.MAKE_PROJECT : IntellaDbIcons.MAKE_GLOBAL);
-            }
-        });
+        group.add(new RefreshConnectionAction(treePanel));
+        group.add(new DisconnectAction(treePanel));
         group.addSeparator();
-        group.add(new AnAction("SQL Console", "Open a SQL console for the selected connection", AllIcons.Nodes.Console) {
-            @Override
-            public void actionPerformed(@NotNull AnActionEvent e) {
-                openConsole(selectedConfig());
-            }
-
-            @Override
-            public @NotNull ActionUpdateThread getActionUpdateThread() {
-                return ActionUpdateThread.EDT;
-            }
-
-            @Override
-            public void update(@NotNull AnActionEvent e) {
-                e.getPresentation().setEnabled(selectedConfig() != null);
-            }
-        });
-        group.add(new AnAction("View Data", "Preview the first rows of the selected table", AllIcons.Actions.Preview) {
-            @Override
-            public void actionPerformed(@NotNull AnActionEvent e) {
-                TableRef table = treePanel.selectedTable();
-                if (table != null) {
-                    openTableData(table);
-                }
-            }
-
-            @Override
-            public @NotNull ActionUpdateThread getActionUpdateThread() {
-                return ActionUpdateThread.EDT;
-            }
-
-            @Override
-            public void update(@NotNull AnActionEvent e) {
-                e.getPresentation().setEnabled(treePanel.selectedTable() != null);
-            }
-        });
-        // AI actions (new chat, provider settings) live in the AI Assistant tab's own toolbar.
+        group.add(new OpenConsoleAction(treePanel));
+        group.add(new EditDataAction(treePanel));
+        group.add(new GoToDdlAction(treePanel));
+        group.addSeparator();
+        group.add(new ViewOptionsAction(project, treePanel));
         ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar("IntellaDbExplorer", group, true);
         toolbar.setTargetComponent(this);
         return toolbar;
+    }
+
+    // ------------------------------------------------------------------ onboarding
+
+    /**
+     * IntelliJ's tool window is useful before any configuration: with no data sources the
+     * tree gives way to quick-create buttons, one per dialect, plus the full dialog.
+     */
+    private @NotNull JComponent createEmptyPanel() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setBorder(JBUI.Borders.empty(16, 20));
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.anchor = GridBagConstraints.LINE_START;
+        gbc.insets = JBUI.insetsBottom(4);
+
+        JBLabel title = new JBLabel("No data sources");
+        title.setFont(UIUtil.getLabelFont().deriveFont(Font.BOLD, JBUI.scaleFontSize(15f)));
+        panel.add(title, gbc);
+        gbc.gridy++;
+        JBLabel subtitle = new JBLabel("Connect a database to browse its schema, run SQL, and edit data.");
+        subtitle.setForeground(UIUtil.getContextHelpForeground());
+        subtitle.setBorder(JBUI.Borders.emptyBottom(8));
+        panel.add(subtitle, gbc);
+
+        gbc.insets = JBUI.insets(1, 0);
+        for (var dialect : dev.phucngu.intelladb.connection.Dialects.all()) {
+            String dialectId = dialect.id();
+            JButton button = new JButton(dialect.displayName(), IntellaDbIcons.connection(dialectId, false));
+            button.setToolTipText("New " + dialect.displayName() + " connection");
+            button.putClientProperty("JButton.buttonType", "toolBarButton");
+            button.setBorder(JBUI.Borders.empty(4, 8));
+            button.addActionListener(event -> treePanel.addConnection(dialectId));
+            gbc.gridy++;
+            panel.add(button, gbc);
+        }
+        JButton all = new JButton("Data Sources…");
+        all.setToolTipText("Open the Data Sources dialog");
+        all.setBorder(JBUI.Borders.empty(4, 8));
+        all.addActionListener(event -> treePanel.showDataSourcesDialog(null, null));
+        gbc.gridy++;
+        gbc.insets = JBUI.insets(10, 0, 0, 0);
+        panel.add(all, gbc);
+        return panel;
+    }
+
+    /** Shows the onboarding panel instead of the tree while there is nothing to browse. */
+    private void updateEmptyState() {
+        setContent(manager.configs().isEmpty() ? emptyPanel : treeScroll);
     }
 
     // ------------------------------------------------------------------ tab management
@@ -309,6 +279,38 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         table.showIn(this, panel);
     }
 
+    /**
+     * Opens the table's DDL in a read-only editor tab — IntelliJ's "Go to DDL". A tab
+     * already open for the same table is focused and its text refreshed.
+     */
+    public void openDdl(@NotNull TableRef table) {
+        String ddl = table.config().dialect().describeSchema(new SchemaCatalog(List.of(
+                new SchemaCatalog.Schema(table.schema(), List.of(table.meta())))));
+        String title = table.schema() + "." + table.name() + ".ddl";
+        FileEditorManager editors = FileEditorManager.getInstance(project);
+        for (VirtualFile open : editors.getOpenFiles()) {
+            if (title.equals(open.getName()) && table.config().id.equals(open.getUserData(DDL_CONFIG_KEY))) {
+                editors.openFile(open, true);
+                setDdlText(open, ddl);
+                return;
+            }
+        }
+        LightVirtualFile file = new LightVirtualFile(title, PlainTextFileType.INSTANCE, ddl);
+        file.putUserData(DDL_CONFIG_KEY, table.config().id);
+        editors.openFile(file, true);
+        setDdlText(file, ddl);
+    }
+
+    private static void setDdlText(@NotNull VirtualFile file, @NotNull String ddl) {
+        Document document = FileDocumentManager.getInstance().getDocument(file);
+        if (document == null || ddl.equals(document.getText())) {
+            return;
+        }
+        document.setReadOnly(false);
+        WriteCommandAction.runWriteCommandAction(null, () -> document.setText(ddl));
+        document.setReadOnly(true);
+    }
+
     // ------------------------------------------------------------------ helpers for children
 
     /** Connects (prompting for a password if needed) and then runs {@code action} on the EDT. */
@@ -341,6 +343,7 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
             return; // change listeners can fire while the project is shutting down
         }
         treePanel.rebuild();
+        updateEmptyState();
     }
 
     @Override

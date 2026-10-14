@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Added
+- **The explorer follows IntelliJ's database-view grammar.** The toolbar is now
+  `[+ ▾][Data Sources…][Refresh][Disconnect][SQL Console][Edit Data][Go to DDL][Eye ▾]`:
+  "+" drafts a new connection of the chosen dialect directly, Edit Data and Go to DDL act
+  on the tree selection (F4 / ⌘B), and the eye menu configures the tree live — group
+  objects by kind or flat, object counts, empty groups, table details, column types.
+- **Typing in the tree finds nodes** (speed search over the same labels the tree shows).
+- **An empty explorer shows quick-create buttons** — one per database — instead of a bare
+  tree, plus the full Data Sources dialog.
+- **Go to DDL opens the table's CREATE statement in a read-only editor tab** (also in the
+  tree's Navigate ▾ menu, with Copy Qualified Name in SQL Scripts ▾).
 - **SQLite and H2 connections.** Both drivers are bundled, so an embedded database needs no
   server: point the Database field at a file path (`app.sqlite3`, `~/db/app`), leave it
   empty for an in-memory database, or use URL-only mode for a full JDBC URL. A SQLite file
