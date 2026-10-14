@@ -724,6 +724,11 @@ public final class ConnectionTreePanel implements Disposable {
         }
     }
 
+    private void setColor(@NotNull DbConfig config, @NotNull String hex) {
+        config.color = hex;
+        manager.saveConfig(config, null, false); // password untouched
+    }
+
     private void copyDdl(@NotNull SchemaCatalog catalog, @NotNull DbDialect dialect, @NotNull String what) {
         CopyPasteManager.getInstance().setContents(new StringSelection(dialect.describeSchema(catalog)));
         NotificationGroupManager.getInstance().getNotificationGroup("IntellaDB")
@@ -767,6 +772,14 @@ public final class ConnectionTreePanel implements Disposable {
                     global ? "Keep this connection in this project only" : "Share this connection with all projects",
                     global ? IntellaDbIcons.MAKE_PROJECT : IntellaDbIcons.MAKE_GLOBAL,
                     () -> manager.setGlobal(config.id, !global)));
+            DefaultActionGroup colors = new DefaultActionGroup("Set Color", true);
+            for (String hex : ConnectionColors.PALETTE) {
+                colors.add(action("", "Mark this connection", ConnectionColors.swatch(hex),
+                        () -> setColor(config, hex)));
+            }
+            colors.add(action("Clear", "Remove the color marker",
+                    com.intellij.icons.AllIcons.Actions.Close, () -> setColor(config, "")));
+            group.add(colors);
         } else if (entry instanceof DatabaseEntry databaseEntry) {
             group.add(action("Refresh Schema", "Reload metadata",
                     com.intellij.icons.AllIcons.Actions.Refresh, this::refreshSelected));
@@ -900,6 +913,11 @@ public final class ConnectionTreePanel implements Disposable {
                     if (manager.isGlobal(config.id)) {
                         plain.append("  · global");
                         append("  · global", SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES);
+                    }
+                    java.awt.Color marker = ConnectionColors.decode(config.color);
+                    if (marker != null) {
+                        plain.append("  ●");
+                        append("  ●", new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, marker));
                     }
                     setIcon(IntellaDbIcons.connection(config.dialectId, connected));
                     DbSession session = manager.session(config.id);

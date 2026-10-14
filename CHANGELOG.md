@@ -30,6 +30,10 @@
   the mode popup beside Execute now also runs "Execute Selection as Single Statement" and
   "Execute Script" right away; and a connection selector beside the schema selector points
   the console at another database of the same kind.
+- **Connections can be color-coded** — Set Color on a tree node paints a dot beside it and
+  tints that connection's console tabs, keeping environments apart at a glance.
+- **The tool window is now called "Database"**, like IntelliJ's, and Data Sources… /
+  New SQL Console are real actions: Find Action (⌘⇧A) and Keymap reach them.
 - **SQLite and H2 connections.** Both drivers are bundled, so an embedded database needs no
   server: point the Database field at a file path (`app.sqlite3`, `~/db/app`), leave it
   empty for an in-memory database, or use URL-only mode for a full JDBC URL. A SQLite file

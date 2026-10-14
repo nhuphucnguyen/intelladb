@@ -9,18 +9,18 @@ import dev.phucngu.intelladb.IntellaDbIcons;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * Registers the "DB Explorer" tool window with two native header tabs — "Explorer"
+ * Registers the "Database" tool window with two native header tabs — "Explorer"
  * (connection tree + DB actions) and "AI Assistant" (chat + AI actions) — so each gets
  * the full tool-window width and its own toolbar instead of sharing a split pane.
  */
 public final class DbToolWindowFactory implements ToolWindowFactory {
 
-    public static final String TOOL_WINDOW_ID = "DB Explorer";
+    public static final String TOOL_WINDOW_ID = "Database";
 
     @Override
     public void createToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
         toolWindow.setIcon(IntellaDbIcons.TOOL_WINDOW);
-        toolWindow.setStripeTitle("DB Explorer");
+        toolWindow.setStripeTitle("Database");
         ContentFactory factory = toolWindow.getContentManager().getFactory();
 
         DbExplorerPanel explorer = new DbExplorerPanel(project);

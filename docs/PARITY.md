@@ -15,7 +15,7 @@ Legend: ✅ done · 🟡 partial · ❌ missing
 | PasswordSafe credential storage | ✅ | service "Intella DB"; save-password-off in-memory mode |
 | Test connection / database + schema probing | ✅ | dialog probes per dialect |
 | Read-only connections | 🟡 | enforced for MongoDB; SQL dialects still need a guard |
-| Connection groups / colors | ❌ | |
+| Connection groups / colors | 🟡 | per-connection marker color (tree dot + console tab tint); groups missing |
 | SSH tunnels | ❌ | planned: Apache MINA sshd local port forwarding |
 | Driver download for unbundled databases | ❌ | unblocks Oracle/MSSQL/ClickHouse without bundling |
 | Keep-alive / auto-disconnect | ✅ | `ConnectionManager.housekeep` |

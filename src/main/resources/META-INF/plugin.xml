@@ -16,7 +16,7 @@
     <depends>com.intellij.modules.platform</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow id="DB Explorer" anchor="right" canCloseContents="false"
+        <toolWindow id="Database" anchor="right" canCloseContents="false"
                     factoryClass="dev.phucngu.intelladb.ui.DbToolWindowFactory"/>
 
         <!-- Console output + result sets, like IntelliJ's Services view for database consoles -->
@@ -26,9 +26,10 @@
 
         <fileEditorProvider implementation="dev.phucngu.intelladb.ui.IntellaDbFileEditorProvider"/>
 
-        <!-- SQL console tabs: "console [@name]" title and console icon -->
+        <!-- SQL console tabs: "console [@name]" title, console icon, connection color tint -->
         <editorTabTitleProvider implementation="dev.phucngu.intelladb.ui.ConsoleFilePresentation"/>
         <fileIconProvider implementation="dev.phucngu.intelladb.ui.ConsoleFilePresentation"/>
+        <editorTabColorProvider implementation="dev.phucngu.intelladb.ui.ConsoleFilePresentation"/>
 
         <applicationService serviceImplementation="dev.phucngu.intelladb.ai.AiSettings"/>
 
@@ -66,6 +67,18 @@
         <!-- reopens the SQL console tabs that were open at the last close -->
         <postStartupActivity implementation="dev.phucngu.intelladb.ui.ConsoleRestoreStartup"/>
     </extensions>
+
+    <actions>
+        <!-- Registered so Find Action / Keymap can reach them; they act on the Database
+             tool window's selection. -->
+        <action id="IntellaDb.DataSources"
+                class="dev.phucngu.intelladb.ui.actions.OpenDataSourcesAction"
+                text="Data Sources…" description="Open the IntellaDB Data Sources dialog"/>
+        <action id="IntellaDb.NewConsole"
+                class="dev.phucngu.intelladb.ui.actions.NewConsoleAction"
+                text="New SQL Console"
+                description="Open a fresh SQL console for the selected connection"/>
+    </actions>
 
     <projectListeners>
         <!-- installs the console header toolbar whenever a console tab (re)opens -->

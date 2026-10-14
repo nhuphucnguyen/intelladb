@@ -363,6 +363,10 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         dev.phucngu.intelladb.connection.SessionOpener.getInstance(project).withSession(config, action);
     }
 
+    public @NotNull ConnectionTreePanel tree() {
+        return treePanel;
+    }
+
     public @NotNull ConnectionManager manager() {
         return manager;
     }

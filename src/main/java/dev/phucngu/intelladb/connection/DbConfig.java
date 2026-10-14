@@ -33,6 +33,8 @@ public class DbConfig {
     public String sslKey = "";
     /** "URL only" connection type: only the URL (plus credentials) is used. */
     public boolean urlOnly = false;
+    /** Marker color as hex RGB ("FF6B35"); empty = none — paints the tree node and console tabs. */
+    public String color = "";
     /** Non-empty replaces the generated URL entirely (advanced use). */
     public String jdbcUrlOverride = "";
 
