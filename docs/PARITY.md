@@ -51,6 +51,7 @@ Legend: ✅ done · 🟡 partial · ❌ missing
 | Context menus as named popups (Navigate ▾, SQL Scripts ▾) | ✅ | |
 | Copy DDL (table/schema) | ✅ | `DdlGenerator` |
 | Go to DDL as a read-only editor tab | ✅ | `DbExplorerPanel.openDdl`, ⌘B on tree nodes |
+| Table editor with Data + DDL tabs | ✅ | `TableEditorPanel`, DDL regenerated on tab select |
 | DDL for every object kind (routines, indexes…) | ❌ | |
 | Object search (tree + everywhere) | 🟡 | tree speed search; no Everywhere/Go to Database Object |
 | Quick documentation popup | ❌ | |

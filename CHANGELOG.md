@@ -13,6 +13,8 @@
   tree, plus the full Data Sources dialog.
 - **Go to DDL opens the table's CREATE statement in a read-only editor tab** (also in the
   tree's Navigate ▾ menu, with Copy Qualified Name in SQL Scripts ▾).
+- **A table's data tab now carries its DDL beside it** — `[Data | DDL]` in the same editor
+  tab, the DDL refreshed from the catalog whenever you switch to it.
 - **SQLite and H2 connections.** Both drivers are bundled, so an embedded database needs no
   server: point the Database field at a file path (`app.sqlite3`, `~/db/app`), leave it
   empty for an in-memory database, or use URL-only mode for a full JDBC URL. A SQLite file

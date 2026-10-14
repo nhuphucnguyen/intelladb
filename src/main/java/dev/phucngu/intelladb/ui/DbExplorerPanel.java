@@ -274,7 +274,9 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
             }
         }, false);
         panel.setSourceTable(table.qualifiedName());
-        IntellaDbFileEditorProvider.attach(file, () -> panel);
+        TableEditorPanel editor = new TableEditorPanel(project, this, table, panel);
+        Disposer.register(this, editor);
+        IntellaDbFileEditorProvider.attach(file, () -> editor);
         com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).openFile(file, true);
         table.showIn(this, panel);
     }
