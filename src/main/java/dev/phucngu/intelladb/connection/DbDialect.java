@@ -199,13 +199,26 @@ public interface DbDialect {
         return selectSql + " LIMIT " + rows;
     }
 
-    /** The query limited to one page of results; {@code limit} <= 0 means no limit. */
+    /** The query limited to one page of results; {@code limit} <= 0 means no limit. A base
+     * that already carries a top-level LIMIT is wrapped — appending one would be a syntax
+     * error on most servers. */
     default @NotNull String limitedQuery(@NotNull String selectSql, int offset, int limit) {
         if (limit <= 0) {
             return selectSql;
         }
-        return offset > 0 ? selectSql + " LIMIT " + limit + " OFFSET " + offset
-                : limit(selectSql, limit);
+        String sql = selectSql.strip();
+        String page = " LIMIT " + limit + " OFFSET " + offset;
+        if (offset > 0 || hasTopLevelLimit(sql)) {
+            return hasTopLevelLimit(sql)
+                    ? "SELECT * FROM (\n" + sql + "\n) AS intelladb_page" + page
+                    : sql + page;
+        }
+        return limit(sql, limit);
+    }
+
+    /** Whether the query ends in its own LIMIT (… OFFSET …) clause, however capitalized. */
+    static boolean hasTopLevelLimit(@NotNull String sql) {
+        return sql.toUpperCase().matches("(?s).*\\bLIMIT\\s+\\d+(\\s+OFFSET\\s+\\d+)?\\s*;?");
     }
 
     /** A query counting the rows {@code selectSql} returns (the grid's row counter). */
@@ -255,9 +268,11 @@ public interface DbDialect {
         return "--";
     }
 
-    /** The statement a table's data preview runs: the first {@code rows} rows of {@code schema.table}. */
+    /** The statement a table's data preview runs: the first {@code rows} rows ({@code rows}
+     * <= 0: no limit) of {@code schema.table}. */
     default @NotNull String previewStatement(@NotNull String schema, @NotNull String table, int rows) {
-        return limit("SELECT * FROM " + quote(schema) + "." + quote(table), rows);
+        String select = "SELECT * FROM " + quote(schema) + "." + quote(table);
+        return rows > 0 ? limit(select, rows) : select;
     }
 
     /**

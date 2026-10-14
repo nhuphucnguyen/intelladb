@@ -126,6 +126,23 @@ class H2DialectTest {
         assertEquals("2", String.valueOf(count.rows.get(0)[0]));
     }
 
+    @Test
+    void filterWrappingWorksOnTheEngine() {
+        // Console-style: the base is wrapped, the filter clauses ride on the wrapper.
+        String wrapped = "SELECT * FROM (\nSELECT id, code FROM owner\n) AS intelladb_filtered"
+                + " WHERE code LIKE 'a%' ORDER BY id DESC";
+        SqlResult result = session.execute(wrapped);
+        assertTrue(result.isSuccessful(), result.text);
+        assertEquals(1, result.rows.size());
+        assertEquals("a1", String.valueOf(result.rows.get(0)[1]));
+
+        // Table-preview style: clauses are appended to the plain SELECT.
+        SqlResult direct = session.execute(
+                DIALECT.previewStatement(schema(), "OWNER", 0) + " WHERE code = 'b2'");
+        assertTrue(direct.isSuccessful(), direct.text);
+        assertEquals(1, direct.rows.size());
+    }
+
     private static String schema() {
         return schemaOf(session.catalog(), "owner").name();
     }

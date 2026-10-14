@@ -271,6 +271,11 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
             }
 
             @Override
+            public @Nullable String baseQuery() {
+                return table.baseQuery();
+            }
+
+            @Override
             public @NotNull DbConfig config() {
                 return table.config();
             }
@@ -288,7 +293,7 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
         Disposer.register(this, editor);
         IntellaDbFileEditorProvider.attach(file, () -> editor);
         com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).openFile(file, true);
-        table.showIn(this, panel);
+        panel.openInitial(); // page one, at the panel's page size
     }
 
     /**

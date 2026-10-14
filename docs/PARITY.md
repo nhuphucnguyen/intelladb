@@ -80,6 +80,10 @@ Legend: ✅ done · 🟡 partial · ❌ missing
 | Results grid, multi-result tabs | ✅ | `ResultsPanel`/`ResultsHub` |
 | Toolbar grammar `[Rerun][Cancel] | [pages][size ▾] | [+ row][del][revert][submit]` | ✅ | `ResultsPanel` |
 | **Pagination** (first/prev/size ▾/next/last, Ctrl+Alt+Up/Down) | 🟡 | SQL dialects page via `LIMIT/OFFSET`, row counts fetched for table previews; MongoDB not paged yet |
+| Filter/sort bar (WHERE + ORDER BY, Ctrl+Alt+Shift+F) | ✅ | appended for table previews, wrapped otherwise; gear-toggleable |
+| Gear menu (filter bar, transpose, column chooser, reset view, statistics) | ✅ | transpose is a read-only view |
+| Statistics footer (n/Σ/avg/min/max per numeric column) | ✅ | over the selection, else all rows |
+| Preview Pending Changes before Submit | ✅ | read-only DML listing with Copy |
 | Inline cell edit → UPDATE (all-or-nothing) | ✅ | `RowUpdates`, PK/unique-key guarded |
 | Set NULL / delete rows | ✅ | |
 | **Add row → INSERT** | ✅ | composes into the same all-or-nothing Submit unit; insert-only grids without a key |
@@ -87,7 +91,7 @@ Legend: ✅ done · 🟡 partial · ❌ missing
 | CSV/TSV **import** | ❌ | |
 | LOB / image cell viewers | ❌ | |
 | Result diff (rerun vs cached) | ❌ | |
-| Aggregate footer | ❌ | |
+| Aggregate footer | ✅ | statistics footer (gear menu) |
 
 ## SQL language
 

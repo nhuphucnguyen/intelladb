@@ -19,6 +19,12 @@
   `[first][prev][size ▾][next][last]` cluster (10/50/100/500/all rows, Ctrl+Alt+Up/Down),
   a remembered page size, and — for table previews — a background row count, so the
   status line reads "rows 51–100 of 1234 · 6 ms".
+- **Filter and sort without retyping the query**: Ctrl+Alt+Shift+F (or the grid's new gear
+  menu) opens a WHERE / ORDER BY bar — Apply re-runs the query narrowed, Reset clears it.
+  The gear also holds Transpose, Column Chooser, Reset View, and a statistics footer
+  (n / Σ / avg / min / max per numeric column over your selection).
+- **Preview Changes** (next to Submit) shows the exact statements Submit would run, with
+  Copy — before anything touches the database.
 - **SQLite and H2 connections.** Both drivers are bundled, so an embedded database needs no
   server: point the Database field at a file path (`app.sqlite3`, `~/db/app`), leave it
   empty for an in-memory database, or use URL-only mode for a full JDBC URL. A SQLite file

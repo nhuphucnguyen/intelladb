@@ -32,6 +32,7 @@ import dev.phucngu.intelladb.util.ResultExporter;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
@@ -64,6 +65,12 @@ public final class ResultsPanel extends JPanel {
          */
         default void runQuery(@NotNull ResultsPanel panel, @NotNull String sql) {
             rerun(panel);
+        }
+
+        /** The unlimited query this result pages and filters from; null when the result's
+         * own SQL is the base (console runs). */
+        default @Nullable String baseQuery() {
+            return null;
         }
 
         /** False for a cached result (query history): Rerun / Cancel are hidden. */
@@ -110,6 +117,8 @@ public final class ResultsPanel extends JPanel {
     private static final int[] PAGE_SIZES = {10, 50, 100, 500};
     private static final int ALL_ROWS = 0;
     private static final String PAGE_SIZE_KEY = "IntellaDb.Results.pageSize";
+    private static final String FILTER_BAR_KEY = "IntellaDb.Results.filterBar";
+    private static final String STATS_KEY = "IntellaDb.Results.stats";
     private int pageSize = loadPageSize();
     /** The query being paged through (the result's own SQL); null until a result arrives. */
     private @Nullable String pageBase;
@@ -121,7 +130,14 @@ public final class ResultsPanel extends JPanel {
     private boolean showingPage;
     /** Set while a fetched page is on its way, so {@link #showResult} keeps the page state. */
     private boolean pageInFlight;
+    /** Set while a filtered fetch is on its way, so the pristine base is kept. */
+    private boolean filterInFlight;
+    /** The pristine base the filter bar narrows; equals {@link #pageBase} until filtered. */
+    private @Nullable String unfilteredBase;
     private @Nullable ActionToolbar leftToolbar;
+    private final GridFilterBar filterBar = new GridFilterBar();
+    private final JBLabel stats = new JBLabel();
+    private boolean statsCompact;
 
     /** Compact grid (no toolbar). */
     public ResultsPanel(@NotNull Project project) {
@@ -134,11 +150,25 @@ public final class ResultsPanel extends JPanel {
         this.host = host;
         this.grid = new ResultGrid(project);
         info.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
-        add(grid.wrapInScrollPane(), BorderLayout.CENTER);
         if (host != null) {
             add(buildToolbar(pinnable), BorderLayout.NORTH);
+            filterBar.setVisible(PropertiesComponent.getInstance().getBoolean(FILTER_BAR_KEY, false));
+            statsCompact = PropertiesComponent.getInstance().getBoolean(STATS_KEY, false);
+            JPanel center = new JPanel(new BorderLayout());
+            center.add(filterBar, BorderLayout.NORTH);
+            center.add(grid.wrapInScrollPane(), BorderLayout.CENTER);
+            add(center, BorderLayout.CENTER);
+            stats.setVisible(false);
+            stats.setBorder(JBUI.Borders.empty(2, 8));
+            add(stats, BorderLayout.SOUTH);
             installEditActions();
+            grid.getSelectionModel().addListSelectionListener(e -> {
+                if (!e.getValueIsAdjusting()) {
+                    updateStats();
+                }
+            });
         } else {
+            add(grid.wrapInScrollPane(), BorderLayout.CENTER);
             info.setBorder(JBUI.Borders.empty(4, 8));
             add(info, BorderLayout.SOUTH);
         }
@@ -183,12 +213,14 @@ public final class ResultsPanel extends JPanel {
         info.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
         switch (result.kind) {
             case ROWS -> {
-                if (pageInFlight) {
+                if (pageInFlight || filterInFlight) {
                     pageInFlight = false;
+                    filterInFlight = false;
                     showingPage = true;
                 } else {
                     // A result as it arrived (console run, preview): paging starts over from it.
                     pageBase = result.sql;
+                    unfilteredBase = result.sql;
                     pageOffset = 0;
                     totalRows = null;
                     showingPage = false;
@@ -199,6 +231,7 @@ public final class ResultsPanel extends JPanel {
                 resultInfo = rowsInfo(result);
                 info.setText(resultInfo);
                 setUpEditing(result);
+                updateStats();
                 refreshToolbar();
                 maybeCountRows();
             }
@@ -433,6 +466,316 @@ public final class ResultsPanel extends JPanel {
         }
     }
 
+    // ------------------------------------------------------------------ filter bar & view options
+
+    /** First fetch for a fresh panel: page one of the host's base query (table previews). */
+    public void openInitial() {
+        String base = host == null ? null : host.baseQuery();
+        if (base == null || running) {
+            return;
+        }
+        pageBase = base;
+        unfilteredBase = base;
+        pageOffset = 0;
+        totalRows = null;
+        if (pageSize > 0) {
+            showingPage = true;
+            pageInFlight = true;
+            runPage(0);
+        } else {
+            showingPage = false;
+            host.runQuery(this, base);
+        }
+    }
+
+    /** Shows or hides the filter bar (the gear menu and Ctrl+Alt+Shift+F). */
+    private void setFilterBarVisible(boolean visible) {
+        filterBar.setVisible(visible);
+        PropertiesComponent.getInstance().setValue(FILTER_BAR_KEY, visible, false);
+        revalidate();
+        repaint();
+        if (visible) {
+            filterBar.focusWhere();
+        }
+    }
+
+    /** Runs the pristine base narrowed by the filter bar's WHERE / ORDER BY fragments. */
+    private void applyFilterBar(boolean reset) {
+        if (host == null || !host.canRerun() || running || !grid.finishCellEditing() || grid.hasEdits()
+                || unfilteredBase == null) {
+            return; // pending edits tie the shown rows to their table — Submit or Revert first
+        }
+        String where = reset ? "" : filterBar.whereText().strip();
+        String orderBy = reset ? "" : filterBar.orderByText().strip();
+        pageBase = composeFiltered(unfilteredBase, where, orderBy);
+        totalRows = null;
+        pageOffset = 0;
+        filterInFlight = true;
+        if (pageSize > 0) {
+            showingPage = true;
+            pageInFlight = true;
+            host.runQuery(this, dialect().limitedQuery(pageBase, 0, pageSize));
+        } else {
+            showingPage = false;
+            host.runQuery(this, pageBase);
+        }
+    }
+
+    /** WHERE / ORDER BY fragments joined onto the base — appended for a plain table scan,
+     * wrapped for anything else (the base may carry clauses of its own). */
+    private @NotNull String composeFiltered(@NotNull String base, @NotNull String where, @NotNull String orderBy) {
+        if (where.isEmpty() && orderBy.isEmpty()) {
+            return base;
+        }
+        String target = host != null && host.isTablePreview() && !DbDialect.hasTopLevelLimit(base)
+                ? base
+                : "SELECT * FROM (\n" + base + "\n) AS intelladb_filtered";
+        return target
+                + (where.isEmpty() ? "" : " WHERE " + where)
+                + (orderBy.isEmpty() ? "" : " ORDER BY " + orderBy);
+    }
+
+    /** Clears the sort, the filter bar's fragments, hidden columns and the page. */
+    private void resetView() {
+        grid.resetSort();
+        grid.showAllColumns();
+        filterBar.clear();
+        if (pageBase != null && unfilteredBase != null && !pageBase.equals(unfilteredBase)) {
+            applyFilterBar(true);
+        } else if (showingPage && pageBase != null) {
+            runPage(0);
+        }
+    }
+
+    /** Aggregates of the numeric columns over the selection (or all rows) — the footer. */
+    private void updateStats() {
+        boolean show = statsCompact && hasRows() && !grid.isTransposed();
+        if (!show) {
+            stats.setVisible(false);
+            return;
+        }
+        List<Object[]> rows = grid.statsRows();
+        StringBuilder text = new StringBuilder();
+        for (int c = 0; result != null && c < result.columns.size(); c++) {
+            if (!grid.isColumnNumeric(c)) {
+                continue;
+            }
+            java.util.DoubleSummaryStatistics summary = new java.util.DoubleSummaryStatistics();
+            for (Object[] row : rows) {
+                if (c < row.length && row[c] instanceof Number number) {
+                    summary.accept(number.doubleValue());
+                }
+            }
+            if (summary.getCount() == 0) {
+                continue;
+            }
+            if (text.length() > 0) {
+                text.append("    ");
+            }
+            text.append(result.columns.get(c)).append(": n ").append(summary.getCount())
+                    .append(" · Σ ").append(trim(summary.getSum()))
+                    .append(" · avg ").append(trim(summary.getAverage()))
+                    .append(" · min ").append(trim(summary.getMin()))
+                    .append(" · max ").append(trim(summary.getMax()));
+        }
+        stats.setText(text.isEmpty() ? "No numeric columns in the result" : text.toString());
+        stats.setVisible(true);
+    }
+
+    private static @NotNull String trim(double value) {
+        double rounded = Math.round(value * 1000.0) / 1000.0;
+        if (rounded == Math.rint(rounded) && Math.abs(rounded) < 1e15) {
+            return String.valueOf((long) rounded);
+        }
+        return String.valueOf(rounded);
+    }
+
+    /** The WHERE / ORDER BY strip above the grid — IntelliJ's filter-and-sorting bar. */
+    private final class GridFilterBar extends JPanel {
+        private final com.intellij.ui.components.JBTextField where = new com.intellij.ui.components.JBTextField();
+        private final com.intellij.ui.components.JBTextField orderBy = new com.intellij.ui.components.JBTextField();
+
+        GridFilterBar() {
+            super(new BorderLayout(8, 0));
+            setBorder(JBUI.Borders.empty(3, 8));
+            where.addActionListener(e -> applyFilterBar(false));
+            orderBy.addActionListener(e -> applyFilterBar(false));
+            JPanel fields = new JPanel(new java.awt.GridLayout(1, 2, 12, 0));
+            fields.setOpaque(false);
+            fields.add(labeled("WHERE", where, "price > 100 AND name LIKE 'A%'"));
+            fields.add(labeled("ORDER BY", orderBy, "name DESC, price"));
+            JPanel buttons = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 4, 0));
+            buttons.setOpaque(false);
+            JButton reset = new JButton("Reset");
+            reset.addActionListener(e -> {
+                clear();
+                applyFilterBar(true);
+            });
+            JButton apply = new JButton("Apply");
+            apply.putClientProperty("JButton.buttonType", "defaultButton");
+            apply.addActionListener(e -> applyFilterBar(false));
+            buttons.add(reset);
+            buttons.add(apply);
+            add(fields, BorderLayout.CENTER);
+            add(buttons, BorderLayout.EAST);
+        }
+
+        String whereText() {
+            return where.getText();
+        }
+
+        String orderByText() {
+            return orderBy.getText();
+        }
+
+        void clear() {
+            where.setText("");
+            orderBy.setText("");
+        }
+
+        void focusWhere() {
+            where.requestFocusInWindow();
+        }
+
+        private static @NotNull JPanel labeled(@NotNull String label,
+                                               @NotNull com.intellij.ui.components.JBTextField field,
+                                               @NotNull String hint) {
+            JPanel row = new JPanel(new BorderLayout(4, 0));
+            row.setOpaque(false);
+            JBLabel text = new JBLabel(label);
+            text.setForeground(com.intellij.util.ui.UIUtil.getContextHelpForeground());
+            text.setBorder(JBUI.Borders.emptyRight(2));
+            field.getEmptyText().setText(hint);
+            row.add(text, BorderLayout.WEST);
+            row.add(field, BorderLayout.CENTER);
+            return row;
+        }
+    }
+
+    /** The gear: this grid's view options — IntelliJ's TableResult.Options popup. */
+    private final class GearAction extends com.intellij.openapi.project.DumbAwareAction {
+        GearAction() {
+            super("View Options", "Configure the grid's view", AllIcons.General.GearPlain);
+        }
+
+        @Override
+        public void actionPerformed(@NotNull AnActionEvent e) {
+            DefaultActionGroup group = new DefaultActionGroup();
+            group.add(new DumbAwareToggleAction("Filter Bar",
+                    "Show the WHERE / ORDER BY bar (Ctrl+Alt+Shift+F)", AllIcons.General.Filter) {
+                @Override
+                public boolean isSelected(@NotNull AnActionEvent e) {
+                    return filterBar.isVisible();
+                }
+
+                @Override
+                public void setSelected(@NotNull AnActionEvent e, boolean state) {
+                    setFilterBarVisible(state);
+                }
+
+                @Override
+                public @NotNull ActionUpdateThread getActionUpdateThread() {
+                    return ActionUpdateThread.EDT;
+                }
+            });
+            group.addSeparator();
+            group.add(new DumbAwareToggleAction("Transpose", "Show columns as rows (read-only view)", null) {
+                @Override
+                public boolean isSelected(@NotNull AnActionEvent e) {
+                    return grid.isTransposed();
+                }
+
+                @Override
+                public void setSelected(@NotNull AnActionEvent e, boolean state) {
+                    if (state && grid.hasEdits()) {
+                        return; // pending edits tie the shown rows to their orientation
+                    }
+                    grid.setTransposed(state);
+                    updateStats();
+                }
+
+                @Override
+                public @NotNull ActionUpdateThread getActionUpdateThread() {
+                    return ActionUpdateThread.EDT;
+                }
+            });
+            group.add(new DumbAwareAction("Column Chooser…", "Choose which columns the grid shows", null) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e) {
+                    DefaultActionGroup columns = new DefaultActionGroup();
+                    for (int c = 0; result != null && c < result.columns.size(); c++) {
+                        int modelIndex = c;
+                        String name = result.columns.get(c);
+                        columns.add(new DumbAwareToggleAction(name, "Show the " + name + " column", null) {
+                            @Override
+                            public boolean isSelected(@NotNull AnActionEvent e) {
+                                return grid.isColumnVisible(modelIndex);
+                            }
+
+                            @Override
+                            public void setSelected(@NotNull AnActionEvent e, boolean state) {
+                                grid.setColumnVisible(modelIndex, state);
+                            }
+
+                            @Override
+                            public @NotNull ActionUpdateThread getActionUpdateThread() {
+                                return ActionUpdateThread.EDT;
+                            }
+                        });
+                    }
+                    showPopup(e, columns);
+                }
+            });
+            group.add(new DumbAwareAction("Reset View", "Clear the sort, filters, hidden columns and page", null) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e) {
+                    resetView();
+                }
+            });
+            group.addSeparator();
+            group.add(new DumbAwareToggleAction("Statistics", "Aggregate the selected rows under the grid", null) {
+                @Override
+                public boolean isSelected(@NotNull AnActionEvent e) {
+                    return statsCompact;
+                }
+
+                @Override
+                public void setSelected(@NotNull AnActionEvent e, boolean state) {
+                    statsCompact = state;
+                    PropertiesComponent.getInstance().setValue(STATS_KEY, state, false);
+                    updateStats();
+                }
+
+                @Override
+                public @NotNull ActionUpdateThread getActionUpdateThread() {
+                    return ActionUpdateThread.EDT;
+                }
+            });
+            showPopup(e, group);
+        }
+
+        private void showPopup(@NotNull AnActionEvent e, @NotNull DefaultActionGroup group) {
+            var popup = com.intellij.openapi.ui.popup.JBPopupFactory.getInstance().createActionGroupPopup(
+                    "View Options", group, e.getDataContext(),
+                    com.intellij.openapi.ui.popup.JBPopupFactory.ActionSelectionAid.SPEEDSEARCH, true);
+            if (e.getInputEvent() instanceof java.awt.event.MouseEvent mouse) {
+                popup.show(new com.intellij.ui.awt.RelativePoint(mouse));
+            } else {
+                popup.showInFocusCenter();
+            }
+        }
+
+        @Override
+        public void update(@NotNull AnActionEvent e) {
+            e.getPresentation().setVisible(host != null && host.canRerun() && !dialect().schemaless());
+        }
+
+        @Override
+        public @NotNull ActionUpdateThread getActionUpdateThread() {
+            return ActionUpdateThread.EDT;
+        }
+    }
+
     // ------------------------------------------------------------------ toolbar
 
     private @NotNull JComponent buildToolbar(boolean pinnable) {
@@ -441,7 +784,11 @@ public final class ResultsPanel extends JPanel {
             @Override
             public void actionPerformed(@NotNull AnActionEvent e) {
                 if (host != null && result != null) {
-                    host.rerun(ResultsPanel.this);
+                    if (showingPage && pageBase != null) {
+                        runPage(pageOffset); // the page as composed — filter included
+                    } else {
+                        host.rerun(ResultsPanel.this);
+                    }
                 }
             }
 
@@ -507,6 +854,7 @@ public final class ResultsPanel extends JPanel {
         left.add(addRowAction);
         left.add(deleteRowsAction);
         left.add(revertAction);
+        left.add(previewChangesAction);
         left.add(submitAction);
 
         DefaultActionGroup right = new DefaultActionGroup();
@@ -549,6 +897,7 @@ public final class ResultsPanel extends JPanel {
                 return ActionUpdateThread.EDT;
             }
         });
+        right.add(new GearAction());
 
         ActionToolbar leftBar = ActionManager.getInstance().createActionToolbar("IntellaDbResults", left, true);
         leftBar.setTargetComponent(this);
@@ -841,6 +1190,28 @@ public final class ResultsPanel extends JPanel {
         }
     };
 
+    /** The statements Submit would run, before running them — IntelliJ's Preview Pending Changes. */
+    private final EditAction previewChangesAction = new EditAction("Preview Changes",
+            "Show the statements Submit would run", AllIcons.Actions.Preview) {
+        @Override
+        public void actionPerformed(@NotNull AnActionEvent e) {
+            if (!grid.finishCellEditing() || !grid.hasEdits()) {
+                return;
+            }
+            try {
+                new PreviewChangesDialog(project, changeStatements()).show();
+            } catch (IllegalStateException emptyRow) {
+                info.setText("A new row with no values cannot be inserted — type at least one cell, or delete the row");
+                info.setForeground(JBUI.CurrentTheme.Label.errorForeground());
+            }
+        }
+
+        @Override
+        boolean enabled() {
+            return grid.hasEdits();
+        }
+    };
+
     private final EditAction submitAction = new EditAction("Submit",
             "Write the edited and deleted rows back to the database", IntellaDbIcons.SUBMIT) {
         @Override
@@ -885,12 +1256,28 @@ public final class ResultsPanel extends JPanel {
         nextPageAction.registerCustomShortcutSet(new com.intellij.openapi.actionSystem.CustomShortcutSet(
                 shortcut(java.awt.event.KeyEvent.VK_DOWN,
                         java.awt.event.InputEvent.CTRL_DOWN_MASK | java.awt.event.InputEvent.ALT_DOWN_MASK)), grid);
+        AnAction filterToggle = new DumbAwareAction("Edit Filter Criteria") {
+            @Override
+            public void actionPerformed(@NotNull AnActionEvent e) {
+                setFilterBarVisible(!filterBar.isVisible());
+            }
+
+            @Override
+            public @NotNull ActionUpdateThread getActionUpdateThread() {
+                return ActionUpdateThread.EDT;
+            }
+        };
+        filterToggle.registerCustomShortcutSet(new com.intellij.openapi.actionSystem.CustomShortcutSet(
+                shortcut(java.awt.event.KeyEvent.VK_F, java.awt.event.InputEvent.CTRL_DOWN_MASK
+                        | java.awt.event.InputEvent.ALT_DOWN_MASK | java.awt.event.InputEvent.SHIFT_DOWN_MASK)),
+                this);
         DefaultActionGroup popup = new DefaultActionGroup();
         popup.add(addRowAction);
         popup.add(setNullAction);
         popup.add(deleteRowsAction);
         popup.addSeparator();
         popup.add(revertAction);
+        popup.add(previewChangesAction);
         popup.add(submitAction);
         com.intellij.ui.PopupHandler.installPopupMenu(grid, popup, "IntellaDbResultsPopup");
     }

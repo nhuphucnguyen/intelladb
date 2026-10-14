@@ -122,11 +122,17 @@ final class ResultGrid extends JBTable {
 
     /** Wraps the grid in a scroll pane whose row header is the frozen row-number gutter. */
     @NotNull JBScrollPane wrapInScrollPane() {
-        JBScrollPane scroll = new JBScrollPane(this);
+        scroll = new JBScrollPane(this);
         scroll.setRowHeaderView(rowHeader);
         scroll.setBorder(JBUI.Borders.empty());
         return scroll;
     }
+
+    @Nullable private JBScrollPane scroll;
+    /** True while the grid shows one row per result column (read-only). */
+    private boolean transposed;
+    /** Columns removed by the column chooser, restored on demand. */
+    private final List<javax.swing.table.TableColumn> hiddenColumns = new java.util.ArrayList<>();
 
     void setResult(@Nullable SqlResult result) {
         model = result == null
@@ -141,10 +147,172 @@ final class ResultGrid extends JBTable {
             sorter.setComparator(c, ResultGrid::compareValues);
         }
         sorter.addRowSorterListener(e -> rowHeader.refresh());
-        setRowSorter(sorter);
+        if (transposed) {
+            setRowSorter(null);
+            setModel(new TransposedModel(model));
+        } else {
+            setRowSorter(sorter);
+        }
+        hiddenColumns.clear(); // a fresh model brings fresh columns
         installHeaderRenderer();
         fitColumns();
         rowHeader.refresh();
+    }
+
+    // ------------------------------------------------------------------ view options
+
+    /** Flips the grid so each result column is a row — a read-only view, like IntelliJ's transpose. */
+    void setTransposed(boolean transpose) {
+        if (transposed == transpose || model == null) {
+            return;
+        }
+        transposed = transpose;
+        if (transpose) {
+            setRowSorter(null);
+            setModel(new TransposedModel(model));
+        } else {
+            setModel(model);
+            TableRowSorter<GridModel> sorter = new TableRowSorter<>(model);
+            for (int c = 0; c < model.getColumnCount(); c++) {
+                sorter.setComparator(c, ResultGrid::compareValues);
+            }
+            sorter.addRowSorterListener(e -> rowHeader.refresh());
+            setRowSorter(sorter);
+        }
+        installHeaderRenderer();
+        fitColumns();
+        if (scroll != null) {
+            scroll.setRowHeaderView(transposed ? null : rowHeader);
+        }
+        rowHeader.refresh();
+    }
+
+    boolean isTransposed() {
+        return transposed;
+    }
+
+    /** Hides or restores the column (model index) — the column chooser. */
+    void setColumnVisible(int modelIndex, boolean visible) {
+        if (transposed) {
+            return;
+        }
+        if (!visible) {
+            for (int view = 0; view < getColumnCount(); view++) {
+                if (convertColumnIndexToModel(view) == modelIndex) {
+                    javax.swing.table.TableColumn column = getColumnModel().getColumn(view);
+                    hiddenColumns.add(column);
+                    removeColumn(column);
+                    return;
+                }
+            }
+        } else {
+            java.util.Iterator<javax.swing.table.TableColumn> it = hiddenColumns.iterator();
+            while (it.hasNext()) {
+                javax.swing.table.TableColumn column = it.next();
+                if (column.getModelIndex() == modelIndex) {
+                    it.remove();
+                    addColumn(column);
+                    break;
+                }
+            }
+            restoreColumnOrder();
+        }
+    }
+
+    boolean isColumnVisible(int modelIndex) {
+        for (int view = 0; view < getColumnCount(); view++) {
+            if (convertColumnIndexToModel(view) == modelIndex) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void showAllColumns() {
+        for (javax.swing.table.TableColumn column : new java.util.ArrayList<>(hiddenColumns)) {
+            addColumn(column);
+        }
+        hiddenColumns.clear();
+        restoreColumnOrder();
+    }
+
+    /** Puts columns back in model order after re-adding hidden ones. */
+    private void restoreColumnOrder() {
+        for (int target = 0; target < getColumnCount(); target++) {
+            for (int view = target; view < getColumnCount(); view++) {
+                if (convertColumnIndexToModel(view) == target) {
+                    if (view != target) {
+                        moveColumn(view, target);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    /** Clears the header-click sort order. */
+    void resetSort() {
+        if (getRowSorter() != null) {
+            getRowSorter().setSortKeys(null);
+        }
+    }
+
+    /** Whether the column (model index) holds numbers — the statistics footer aggregates these. */
+    boolean isColumnNumeric(int modelIndex) {
+        return isNumericColumn(modelIndex);
+    }
+
+    /**
+     * The rows statistics are computed over — the selection when there is one, else every
+     * row — as model-column value arrays.
+     */
+    @NotNull List<Object[]> statsRows() {
+        int[] selected = getSelectedRows();
+        List<Object[]> rows = new java.util.ArrayList<>(Math.max(1, selected.length));
+        if (selected.length == 0) {
+            for (int view = 0; view < getRowCount(); view++) {
+                rows.add(rowValues(convertRowIndexToModel(view)));
+            }
+        } else {
+            for (int view : selected) {
+                rows.add(rowValues(convertRowIndexToModel(view)));
+            }
+        }
+        return rows;
+    }
+
+    /** The grid flipped: one row per column of the result, read-only; column 0 names them. */
+    private static final class TransposedModel extends javax.swing.table.AbstractTableModel {
+        private final GridModel source;
+
+        TransposedModel(@NotNull GridModel source) {
+            this.source = source;
+        }
+
+        @Override
+        public int getRowCount() {
+            return source.getColumnCount();
+        }
+
+        @Override
+        public int getColumnCount() {
+            return source.getRowCount() + 1;
+        }
+
+        @Override
+        public String getColumnName(int column) {
+            return column == 0 ? "Column" : "Row " + column;
+        }
+
+        @Override
+        public Object getValueAt(int row, int column) {
+            return column == 0 ? source.getColumnName(row) : source.getValueAt(column - 1, row);
+        }
+
+        @Override
+        public boolean isCellEditable(int row, int column) {
+            return false;
+        }
     }
 
     /** Marks the columns (model indexes) that are the source table's primary key in their headers. */
@@ -228,7 +396,7 @@ final class ResultGrid extends JBTable {
 
     /** Whether the result is editable at all (rows can then be deleted and cells set to NULL). */
     boolean isWritable() {
-        return model.writable != null && !model.locked;
+        return !transposed && model.writable != null && !model.locked;
     }
 
     /** Sets every editable selected cell to NULL. */
@@ -410,6 +578,9 @@ final class ResultGrid extends JBTable {
     // ------------------------------------------------------------------ JSON cells
 
     private @NotNull JsonKind jsonKind(int viewRow, int viewColumn) {
+        if (transposed) {
+            return JsonKind.NONE; // badges are laid out for the normal orientation
+        }
         int modelRow = convertRowIndexToModel(viewRow);
         int modelColumn = convertColumnIndexToModel(viewColumn);
         long key = (long) modelRow * Math.max(1, model.getColumnCount()) + modelColumn;

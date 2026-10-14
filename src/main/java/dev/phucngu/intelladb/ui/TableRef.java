@@ -25,9 +25,14 @@ public record TableRef(@NotNull DbConfig config, @Nullable String database, @Not
         return dialect.quote(schema) + "." + dialect.quote(meta.name);
     }
 
+    /** The table's unlimited base query — what previews page and filter from. */
+    public @NotNull String baseQuery() {
+        return config.dialect().previewStatement(schema, meta.name, 0);
+    }
+
     /** Loads a row preview into the given results panel (async). */
     public void showIn(@NotNull DbExplorerPanel explorer, @NotNull ResultsPanel panel) {
-        showSql(explorer, panel, config.dialect().previewStatement(schema, meta.name, 200));
+        showSql(explorer, panel, baseQuery());
     }
 
     /** Runs {@code sql} — pagination pages, filtered variants — into the panel (async). */

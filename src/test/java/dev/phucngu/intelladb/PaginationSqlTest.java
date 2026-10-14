@@ -40,4 +40,26 @@ class PaginationSqlTest {
             assertTrue(sql.endsWith(") AS intelladb_count"), dialect.id() + ": " + sql);
         }
     }
+
+    @Test
+    void aBaseWithItsOwnLimitIsWrappedNotDoubled() {
+        PostgresDialect dialect = new PostgresDialect();
+        assertEquals("SELECT * FROM (\nSELECT * FROM t LIMIT 5\n) AS intelladb_page LIMIT 50 OFFSET 100",
+                dialect.limitedQuery("SELECT * FROM t LIMIT 5", 100, 50));
+        assertEquals("SELECT * FROM (\nSELECT * FROM t LIMIT 5\n) AS intelladb_page LIMIT 50 OFFSET 0",
+                dialect.limitedQuery("SELECT * FROM t LIMIT 5", 0, 50));
+        // a LIMIT deep inside a subquery is not the base's own — appending is correct
+        assertEquals("SELECT * FROM (SELECT * FROM t LIMIT 5) x LIMIT 10",
+                dialect.limitedQuery("SELECT * FROM (SELECT * FROM t LIMIT 5) x", 0, 10));
+    }
+
+    @Test
+    void previewWithoutALimitIsThePlainSelect() {
+        for (DbDialect dialect : SQL_DIALECTS) {
+            String sql = dialect.previewStatement("public", "owner", 0);
+            assertTrue(sql.toLowerCase().contains("owner"), dialect.id() + ": " + sql);
+            org.junit.jupiter.api.Assertions.assertFalse(sql.toUpperCase().contains("LIMIT"),
+                    dialect.id() + ": " + sql);
+        }
+    }
 }
