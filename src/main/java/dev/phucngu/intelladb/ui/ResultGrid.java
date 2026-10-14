@@ -169,8 +169,52 @@ final class ResultGrid extends JBTable {
         model.locked = locked;
     }
 
+    /**
+     * Whether loaded rows accept edits and deletion — false when they can't be found again
+     * (no key in the result) while new rows can still be added and inserted.
+     */
+    void setLoadedRowsEditable(boolean editable) {
+        model.loadedRowsEditable = editable;
+    }
+
+    boolean loadedRowsEditable() {
+        return model.loadedRowsEditable;
+    }
+
+    /** Whether the selection touches a new (not yet inserted) row. */
+    boolean selectionIncludesInsertedRow() {
+        for (int view : getSelectedRows()) {
+            if (model.isInserted(convertRowIndexToModel(view))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     boolean hasEdits() {
-        return !model.edits.isEmpty() || !model.deleted.isEmpty();
+        return !model.edits.isEmpty() || !model.deleted.isEmpty() || !model.inserted.isEmpty();
+    }
+
+    /** Rows appended with Add Row, waiting to be inserted by Submit. */
+    int insertedRowCount() {
+        return model.inserted.size();
+    }
+
+    /** The typed cells of every new row (model column → value), rows in the order added. */
+    @NotNull List<java.util.Map<Integer, Object>> insertedRows() {
+        List<java.util.Map<Integer, Object>> copy = new java.util.ArrayList<>();
+        model.inserted.forEach(cells -> copy.add(new java.util.TreeMap<>(cells)));
+        return copy;
+    }
+
+    /** Appends an empty new row at the end, ready to be typed into. */
+    void addInsertedRow() {
+        int index = model.inserted.size();
+        model.inserted.add(new java.util.HashMap<>());
+        int row = model.rows.size() + index;
+        model.fireTableRowsInserted(row, row);
+        rowHeader.refresh();
+        model.onChange.run();
     }
 
     int deletedRowCount() {
@@ -202,18 +246,34 @@ final class ResultGrid extends JBTable {
         }
     }
 
-    /** Marks the rows touched by the selection deleted; their pending edits are dropped. */
+    /**
+     * Marks the rows touched by the selection deleted; their pending edits are dropped. A new
+     * (not yet inserted) row is discarded outright instead.
+     */
     void deleteSelectedRows() {
         if (!isWritable() || !finishCellEditing()) {
             return;
         }
+        java.util.List<Integer> discardInserted = new java.util.ArrayList<>();
         for (int view : getSelectedRows()) {
             int row = convertRowIndexToModel(view);
-            model.deleted.add(row);
-            model.edits.remove(row);
+            if (model.isInserted(row)) {
+                discardInserted.add(row - model.rows.size());
+            } else {
+                model.deleted.add(row);
+                model.edits.remove(row);
+            }
         }
-        repaint();
-        rowHeader.repaint();
+        if (!discardInserted.isEmpty()) {
+            discardInserted.sort(java.util.Comparator.reverseOrder()); // descending: removing shifts the rest
+            discardInserted.forEach(index -> model.inserted.remove((int) index));
+            jsonCells.clear();
+            model.fireTableDataChanged();
+            rowHeader.refresh();
+        } else {
+            repaint();
+            rowHeader.repaint();
+        }
         model.onChange.run();
     }
 
@@ -238,12 +298,26 @@ final class ResultGrid extends JBTable {
         return !isEditing() || getCellEditor().stopCellEditing();
     }
 
-    /** The edits were written to the database: they become the loaded values, deleted rows go. */
+    /** The edits were written to the database: they become the loaded values, deleted rows go,
+     * and inserted rows join the loaded ones with the values they were given. */
     void acceptEdits() {
         model.edits.forEach((row, cells) -> cells.forEach((column, value) -> model.rows.get(row)[column] = value));
         boolean removed = !model.deleted.isEmpty();
         new java.util.TreeSet<>(model.deleted).descendingSet().forEach(row -> model.rows.remove((int) row));
         model.deleted.clear();
+        if (!model.inserted.isEmpty()) {
+            for (java.util.Map<Integer, Object> cells : model.inserted) {
+                Object[] values = new Object[model.getColumnCount()];
+                cells.forEach((column, value) -> {
+                    if (column < values.length) {
+                        values[column] = value;
+                    }
+                });
+                model.rows.add(values);
+            }
+            model.inserted.clear();
+            removed = true;
+        }
         if (removed) {
             clearSelection();
             model.fireTableDataChanged();
@@ -262,6 +336,7 @@ final class ResultGrid extends JBTable {
     private void clearEdits() {
         model.edits.clear();
         model.deleted.clear();
+        model.inserted.clear();
         jsonCells.clear();
         repaint();
         rowHeader.repaint();
@@ -289,7 +364,7 @@ final class ResultGrid extends JBTable {
     @NotNull List<Object[]> rowsInViewOrder() {
         List<Object[]> rows = new java.util.ArrayList<>(getRowCount());
         for (int view = 0; view < getRowCount(); view++) {
-            rows.add(model.rows.get(convertRowIndexToModel(view)));
+            rows.add(rowValues(convertRowIndexToModel(view)));
         }
         return rows;
     }
@@ -300,9 +375,23 @@ final class ResultGrid extends JBTable {
         java.util.Arrays.sort(selected);
         List<Object[]> rows = new java.util.ArrayList<>(selected.length);
         for (int view : selected) {
-            rows.add(model.rows.get(convertRowIndexToModel(view)));
+            rows.add(rowValues(convertRowIndexToModel(view)));
         }
         return rows;
+    }
+
+    /** Row {@code modelRow} as a value array: loaded (with its edits applied by the model) or new. */
+    private @NotNull Object[] rowValues(int modelRow) {
+        if (model.isInserted(modelRow)) {
+            Object[] values = new Object[model.getColumnCount()];
+            model.inserted.get(modelRow - model.rows.size()).forEach((column, value) -> {
+                if (column < values.length) {
+                    values[column] = value;
+                }
+            });
+            return values;
+        }
+        return model.rows.get(modelRow);
     }
 
     /** Selects whole rows {@code from..to} (view indices, any order), optionally adding to the selection. */
@@ -347,6 +436,7 @@ final class ResultGrid extends JBTable {
     private static final JBColor BADGE_HOVER_BACKGROUND = new JBColor(new Color(0xC2D4F2), new Color(0x3C5480));
     private static final JBColor EDITED_BACKGROUND = new JBColor(new Color(0xD5E8FF), new Color(0x2B4058));
     private static final JBColor DELETED_BACKGROUND = new JBColor(new Color(0xFBDADA), new Color(0x4A2E2E));
+    private static final JBColor NEW_ROW_BACKGROUND = new JBColor(new Color(0xDFEEDA), new Color(0x2E4632));
     private static final JBColor BADGE_FOREGROUND = new JBColor(new Color(0x2A5DB0), new Color(0xA9C6F5));
 
     private static @NotNull Font badgeFont(@NotNull Font cellFont) {
@@ -450,7 +540,10 @@ final class ResultGrid extends JBTable {
             badgeHovered = row == hoveredRow && column == hoveredColumn;
             int modelRow = table.convertRowIndexToModel(row);
             boolean deleted = model.deleted.contains(modelRow);
-            if (!selected && deleted) {
+            boolean newRow = model.isInserted(modelRow);
+            if (!selected && newRow) {
+                setBackground(NEW_ROW_BACKGROUND);
+            } else if (!selected && deleted) {
                 setBackground(DELETED_BACKGROUND);
             } else if (!selected && model.isEdited(modelRow, table.convertColumnIndexToModel(column))) {
                 setBackground(EDITED_BACKGROUND);
@@ -598,10 +691,14 @@ final class ResultGrid extends JBTable {
         /** Editable columns by model index; null when the result is read-only. */
         private boolean @Nullable [] writable;
         private boolean locked;
+        /** Whether loaded rows accept edits and deletion; false when only inserts are possible. */
+        private boolean loadedRowsEditable = true;
         /** Pending edits: model row → (model column → new value). */
         private final java.util.Map<Integer, java.util.Map<Integer, Object>> edits = new java.util.HashMap<>();
         /** Rows marked for deletion (model indices). */
         private final java.util.Set<Integer> deleted = new java.util.HashSet<>();
+        /** New rows waiting to be inserted: typed values by model column, in the order added. */
+        private final List<java.util.Map<Integer, Object>> inserted = new java.util.ArrayList<>();
         private Runnable onChange = () -> {
         };
 
@@ -617,7 +714,12 @@ final class ResultGrid extends JBTable {
 
         @Override
         public int getRowCount() {
-            return rows.size();
+            return rows.size() + inserted.size();
+        }
+
+        /** A row beyond the loaded ones: appended with Add Row, not inserted yet. */
+        boolean isInserted(int row) {
+            return row >= rows.size();
         }
 
         @Override
@@ -632,6 +734,9 @@ final class ResultGrid extends JBTable {
 
         @Override
         public Object getValueAt(int row, int column) {
+            if (isInserted(row)) {
+                return inserted.get(row - rows.size()).get(column);
+            }
             java.util.Map<Integer, Object> edited = edits.get(row);
             if (edited != null && edited.containsKey(column)) {
                 return edited.get(column);
@@ -664,12 +769,25 @@ final class ResultGrid extends JBTable {
 
         /** The cell can take a new value (SET NULL included), multi-line or not. */
         boolean isWritable(int row, int column) {
-            return writable != null && !locked && column < writable.length && writable[column] && !deleted.contains(row);
+            return writable != null && !locked && column < writable.length && writable[column]
+                    && (isInserted(row) || loadedRowsEditable && !deleted.contains(row));
         }
 
-        /** Records an edit (null = SET NULL); typing back the loaded value (or nothing into a NULL) drops it. */
+        /** Records an edit (null = SET NULL); typing back the loaded value (or nothing into a NULL) drops it.
+         * In a new row, an emptied cell goes back to the table's default (the column is left out of the INSERT). */
         @Override
         public void setValueAt(Object value, int row, int column) {
+            if (isInserted(row)) {
+                java.util.Map<Integer, Object> cells = inserted.get(row - rows.size());
+                if (value == null || String.valueOf(value).isEmpty()) {
+                    cells.remove(column);
+                } else {
+                    cells.put(column, value);
+                }
+                fireTableCellUpdated(row, column);
+                onChange.run();
+                return;
+            }
             Object loaded = loadedValue(row, column);
             boolean unchanged = loaded == null
                     ? value == null || String.valueOf(value).isEmpty()

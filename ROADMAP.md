@@ -15,8 +15,8 @@ Built milestone by milestone, same discipline as the sibling
 | M8 | Visual verification in `runIde` sandbox via computer use (all flows above), bug-fix round: modal-dialog modality, plugin-bundled JDBC driver loading, preset combo labels, connected-state label, AI panel connection fallback | ✅ |
 | M9 | Reasoning-model handling (GLM): empty-answer detection pointing at Max tokens, ping budget 512, default max tokens 2048 — verified against the live Z.ai coding plan | ✅ |
 | M9b | Liquibase: SQL injection into XML `<sql>` blocks + INSERT column↔value caret aid with inline column hints (7 new unit tests) — verified in sandbox | ✅ |
-| M10 | More dialects: MySQL done (M53), MariaDB done (M59), MongoDB done (M60); SQLite / H2 remaining | in progress |
-| M11 | Data editing in the grid: inline edit + UPDATE, Set NULL and row deletion done (M56–M57), CSV export done; adding rows remaining | in progress |
+| M10 | More dialects: MySQL done (M53), MariaDB done (M59), MongoDB done (M60), SQLite and H2 done (M61) | ✅ |
+| M11 | Data editing in the grid: inline edit + UPDATE, Set NULL and row deletion done (M56–M57), CSV export done, adding rows done (M63) | ✅ |
 | M12 | AI: streaming responses, "explain this error", index advice, per-table context menus | planned |
 | M13 | Query history, bookmarks, schema compare | planned |
 | M9c | Conversation-style chat with inline results (replaced separate AI—Result tab) | ✅ |
@@ -30,6 +30,9 @@ Built milestone by milestone, same discipline as the sibling
 | M58 | Global connections: app-level `GlobalConnections` store merged into each project's `ConnectionManager`; Make Global / Make Project (toolbar ↗, context menu, dialog checkbox); sessions stay per project; "Data Sources" dialog listing every connection (Global / Project groups, add per driver, remove, duplicate, ↗ / ↙), edits kept per connection until Apply / OK | ✅ |
 | M59 | MariaDB dialect: `MariaDbDialect extends MySqlDialect` on the same Connector/J (`jdbc:mariadb:` URLs, no RSA key retrieval, sequences / RETURNING / INET6 in the vocabulary), official logo, integration test against MariaDB 11 | ✅ |
 | M60 | MongoDB: `SessionEngine` seam under `DbSession` (`JdbcEngine` for SQL, `MongoEngine` on the MongoDB Java driver); `MongoShellParser` (mongosh commands, relaxed object literals, shell constructors, Extended JSON); catalog of databases/collections/sampled fields/indexes/views; mongosh console language (lexer, highlighter, splitter rules) with completion; documents as editable rows (`updateOne`/`deleteOne` by `_id`, types kept); Tx: Manual on replica sets; read-only guard; cancel via killOp; AI prompt in mongosh; official leaf icon; integration tests on a standalone server and a replica set | ✅ |
+| M61 | SQLite and H2 (embedded): xerial and H2 drivers bundled; file/`:memory:` URLs (Database field holds the path, blank = in-memory), no host/auth by default, `namespaceNames` hook synthesizes SQLite's `main` schema (xerial reports neither schemas nor catalogs — verified live), H2 nests like PostgreSQL with `PUBLIC` and hidden `INFORMATION_SCHEMA`; engine round-trip tests on in-memory databases; original cylinder icons (not the vendor marks) | ✅ |
+| M62 | Dialect capability registry — the keyed-extension pattern of IntelliJ's DatabaseTools plugin (`DbmsExtension`/`KeyedExtensionCollector`), re-expressed: `connection/capability/Capabilities` chains per-dialect bindings over a generic base; `ObjectsLoader` and the new `RowMutator` (insert/update/delete statements) migrated onto it, `DbDialect` stays the facade. A dialect now states only what it changes | ✅ |
+| M63 | Add Row in the results grid: a new row appears with a green background and is typed into like any cell (an emptied cell falls back to the table default); Delete discards it; Submit composes one INSERT per new row into the same all-or-nothing unit. Results without a key become insert-only ("new rows can still be added"); MongoDB writes `insertOne`, composing with updates in one unit | ✅ |
 
 ## Verification record (M8)
 

@@ -3,6 +3,21 @@
 ## Unreleased
 
 ### Added
+- **SQLite and H2 connections.** Both drivers are bundled, so an embedded database needs no
+  server: point the Database field at a file path (`app.sqlite3`, `~/db/app`), leave it
+  empty for an in-memory database, or use URL-only mode for a full JDBC URL. A SQLite file
+  shows its tables under one `main` schema (the driver reports no schemas of its own); H2
+  nests like PostgreSQL — tables under `PUBLIC`, `INFORMATION_SCHEMA` hidden. New rows can
+  be inserted from the results grid in both. Under the hood, dialects gained a capability
+  registry in the style of IntelliJ's database plugin: each dialect binds only what it
+  changes over a generic fallback, and the row mutator (insert/update/delete) is now such a
+  capability — MongoDB binds one that speaks mongosh.
+- **Add Row in the results grid.** Add Row (toolbar, context menu) appends a green new row;
+  type the cells (an emptied one falls back to the table's default), Delete discards a new
+  row, and Submit inserts it in the same all-or-nothing unit as edits and deletions. Results
+  whose table has no key usable for updates become insert-only, with the Submit tooltip
+  saying so — the whole grid no longer turns read-only just because the key is missing.
+  MongoDB inserts documents with `insertOne`, composed with updates in one unit.
 - **PostgreSQL connections without a database browse every database.** Leave Database empty
   and the tree shows each database on the server with its schemas; the Schemas tab lists
   every database's schemas as `database.schema`, so you can pick exactly the ones to show

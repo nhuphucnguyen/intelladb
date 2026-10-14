@@ -248,6 +248,7 @@ public final class ResultsPanel extends JPanel {
         }
 
         left.addSeparator();
+        left.add(addRowAction);
         left.add(deleteRowsAction);
         left.add(revertAction);
         left.add(submitAction);
@@ -415,35 +416,41 @@ public final class ResultsPanel extends JPanel {
 
     // ------------------------------------------------------------------ editing
 
-    /** Makes the grid editable when the rows can be found again in their table, else notes why not. */
+    /** Makes the grid editable when the rows can be found again in their table (a key, for
+     * updates and deletes) or at least added to (inserts), else notes why not. */
     private void setUpEditing(@NotNull SqlResult result) {
-        readOnlyReason = editBlocker(result);
-        if (readOnlyReason != null) {
+        String base = singleTableBlocker(result);
+        if (base != null) {
+            readOnlyReason = base;
             return;
         }
+        String keyReason = keyBlocker(result);
+        readOnlyReason = keyReason == null ? null : keyReason + " — new rows can still be added";
         TableMeta table = sourceTableMeta(host.config(), result).tables().get(0);
         java.util.Set<String> tableColumns = new java.util.HashSet<>();
         table.columns.forEach(column -> tableColumns.add(column.name));
         java.util.Map<String, Integer> seen = new java.util.HashMap<>();
         for (int c = 0; c < result.columns.size(); c++) {
-            String base = result.sourceColumn(c);
-            if (base != null) {
-                seen.merge(base, 1, Integer::sum);
+            String sourceColumn = result.sourceColumn(c);
+            if (sourceColumn != null) {
+                seen.merge(sourceColumn, 1, Integer::sum);
             }
         }
         boolean[] writable = new boolean[result.columns.size()];
         for (int c = 0; c < writable.length; c++) {
-            String base = result.sourceColumn(c);
+            String sourceColumn = result.sourceColumn(c);
             // A column shown twice would get two conflicting edits: leave both read-only. Documents
             // (schemaless) have no fixed column list: any field of the result can be written.
-            writable[c] = base != null && (dialect().schemaless() || tableColumns.contains(base)) && seen.get(base) == 1;
+            writable[c] = sourceColumn != null && (dialect().schemaless() || tableColumns.contains(sourceColumn))
+                    && seen.get(sourceColumn) == 1;
         }
         editTable = result.qualifiedSource(dialect());
+        grid.setLoadedRowsEditable(keyReason == null);
         grid.setWritableColumns(writable, this::editsChanged);
     }
 
-    /** Why the rows of {@code result} can't be written back, or null when they can. */
-    private @Nullable String editBlocker(@NotNull SqlResult result) {
+    /** Why the result's rows aren't tied to one table of this connection, or null when they are. */
+    private @Nullable String singleTableBlocker(@NotNull SqlResult result) {
         DbConfig config = host == null || !host.canRerun() ? null : host.config();
         if (config == null) {
             return "Read-only: not a live result";
@@ -454,11 +461,15 @@ public final class ResultsPanel extends JPanel {
         if (result.sourceTable == null || result.sourceColumns.isEmpty()) {
             return "Read-only: the rows don't come from a single table";
         }
-        SchemaCatalog.Schema source = sourceTableMeta(config, result);
-        if (source == null) {
+        if (sourceTableMeta(config, result) == null) {
             return "Read-only: " + result.qualifiedSource(dialect()) + " is not in the loaded schema (refresh it)";
         }
-        TableMeta table = source.tables().get(0);
+        return null;
+    }
+
+    /** Why loaded rows can't be edited or deleted (they need a key in the result); sets {@link #keyColumns}. */
+    private @Nullable String keyBlocker(@NotNull SqlResult result) {
+        TableMeta table = sourceTableMeta(host.config(), result).tables().get(0);
         List<String> key = dev.phucngu.intelladb.sql.RowUpdates.rowKey(table);
         if (key == null) {
             return "Read-only: " + table.name + " has no primary key or NOT NULL unique key";
@@ -480,19 +491,23 @@ public final class ResultsPanel extends JPanel {
             return;
         }
         info.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
-        String pending = pendingSummary(grid.editedCellCount(), grid.deletedRowCount(), "changed cell", "deleted row");
+        String pending = pendingSummary(grid.editedCellCount(), grid.insertedRowCount(), grid.deletedRowCount(),
+                "changed cell", "new row", "deleted row");
         info.setText(pending.isEmpty() ? resultInfo : resultInfo + "  ·  " + pending + " pending — Submit to save");
     }
 
-    /** "2 changed cells, 1 deleted row" (either part left out when zero). */
-    private static @NotNull String pendingSummary(int first, int second, @NotNull String firstNoun,
-                                                  @NotNull String secondNoun) {
+    /** "2 changed cells, 1 new row, 3 deleted rows" (each part left out when zero). */
+    private static @NotNull String pendingSummary(int first, int second, int third, @NotNull String firstNoun,
+                                                  @NotNull String secondNoun, @NotNull String thirdNoun) {
         List<String> parts = new java.util.ArrayList<>();
         if (first > 0) {
             parts.add(first + " " + firstNoun + (first == 1 ? "" : "s"));
         }
         if (second > 0) {
             parts.add(second + " " + secondNoun + (second == 1 ? "" : "s"));
+        }
+        if (third > 0) {
+            parts.add(third + " " + thirdNoun + (third == 1 ? "" : "s"));
         }
         return String.join(", ", parts);
     }
@@ -529,6 +544,19 @@ public final class ResultsPanel extends JPanel {
         }
     };
 
+    private final EditAction addRowAction = new EditAction("Add Row",
+            "Append a new row to type into; Submit inserts it", AllIcons.General.Add) {
+        @Override
+        public void actionPerformed(@NotNull AnActionEvent e) {
+            grid.addInsertedRow();
+        }
+
+        @Override
+        boolean enabled() {
+            return grid.isWritable() && !grid.isEditing();
+        }
+    };
+
     private final EditAction deleteRowsAction = new EditAction("Delete Rows",
             "Mark the selected rows for deletion; Submit deletes them", AllIcons.General.Remove) {
         @Override
@@ -538,7 +566,8 @@ public final class ResultsPanel extends JPanel {
 
         @Override
         boolean enabled() {
-            return grid.isWritable() && !grid.isEditing() && grid.getSelectedRowCount() > 0;
+            return grid.isWritable() && !grid.isEditing() && grid.getSelectedRowCount() > 0
+                    && (grid.loadedRowsEditable() || grid.selectionIncludesInsertedRow());
         }
     };
 
@@ -594,6 +623,7 @@ public final class ResultsPanel extends JPanel {
                         ? shortcut(java.awt.event.KeyEvent.VK_BACK_SPACE, java.awt.event.InputEvent.META_DOWN_MASK)
                         : shortcut(java.awt.event.KeyEvent.VK_Y, java.awt.event.InputEvent.CTRL_DOWN_MASK)), grid);
         DefaultActionGroup popup = new DefaultActionGroup();
+        popup.add(addRowAction);
         popup.add(setNullAction);
         popup.add(deleteRowsAction);
         popup.addSeparator();
@@ -606,10 +636,16 @@ public final class ResultsPanel extends JPanel {
         return new com.intellij.openapi.actionSystem.KeyboardShortcut(javax.swing.KeyStroke.getKeyStroke(key, modifiers), null);
     }
 
-    /** Writes the pending edits back: one UPDATE per edited row and one DELETE per deleted row, all or nothing. */
+    /** Writes the pending edits back: one UPDATE per edited row, one DELETE per deleted row and
+     * one INSERT per new row, all or nothing. */
     private void submitEdits() {
         if (submitting || editTable == null || host == null || host.config() == null || !grid.finishCellEditing()
                 || !grid.hasEdits()) {
+            return;
+        }
+        if (grid.insertedRows().stream().anyMatch(java.util.Map::isEmpty)) {
+            info.setText("A new row with no values cannot be inserted — type at least one cell, or delete the row");
+            info.setForeground(JBUI.CurrentTheme.Label.errorForeground());
             return;
         }
         SqlResult shown = result;
@@ -619,6 +655,7 @@ public final class ResultsPanel extends JPanel {
             }
             List<String> statements = changeStatements();
             int updated = grid.edits().size();
+            int inserted = grid.insertedRowCount();
             int deleted = grid.deletedRowCount();
             submitting = true;
             grid.setEditsLocked(true);
@@ -626,7 +663,8 @@ public final class ResultsPanel extends JPanel {
             ApplicationManager.getApplication().executeOnPooledThread(() -> {
                 SqlResult outcome = session.applyRowUpdates(shown.database, statements);
                 ApplicationManager.getApplication().invokeLater(() ->
-                        submitted(shown, statements, outcome, pendingSummary(updated, deleted, "row updated", "row deleted")));
+                        submitted(shown, statements, outcome,
+                                pendingSummary(updated, inserted, deleted, "row updated", "row inserted", "row deleted")));
             });
         });
     }
@@ -646,6 +684,19 @@ public final class ResultsPanel extends JPanel {
         });
         for (int row : grid.deletedRows()) {
             statements.add(dialect().deleteStatement(result.sourceSchema, result.sourceTable, loadedKey(row)));
+        }
+        for (java.util.Map<Integer, Object> cells : grid.insertedRows()) {
+            java.util.Map<String, Object> values = new java.util.LinkedHashMap<>();
+            cells.forEach((column, value) -> {
+                String sourceColumn = result.sourceColumn(column);
+                if (sourceColumn != null) {
+                    values.put(sourceColumn, value);
+                }
+            });
+            if (values.isEmpty()) {
+                throw new IllegalStateException("A new row with no values cannot be inserted");
+            }
+            statements.add(dialect().insertStatement(result.sourceSchema, result.sourceTable, values));
         }
         return statements;
     }

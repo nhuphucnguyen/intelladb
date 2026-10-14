@@ -769,15 +769,19 @@ public final class MongoEngine implements SessionEngine {
             List<CollectionCall> calls = new ArrayList<>();
             for (String statement : statements) {
                 if (!(MongoShellParser.parseCommand(statement) instanceof CollectionCall call)
-                        || !Set.of("updateOne", "deleteOne").contains(call.call().name())) {
+                        || !Set.of("insertOne", "updateOne", "deleteOne").contains(call.call().name())) {
                     throw new IllegalArgumentException("Not a row update: " + statement);
                 }
                 calls.add(call);
             }
             requireWritable("Submit");
-            // Check first: nothing is written unless every change finds exactly its one document.
+            // Check first: nothing is written unless every update or delete finds exactly its one
+            // document. An insert has nothing to match — its document is new.
             for (int i = 0; i < calls.size(); i++) {
                 CollectionCall call = calls.get(i);
+                if (call.call().name().equals("insertOne")) {
+                    continue;
+                }
                 long matches = db(call.database()).getCollection(call.collection())
                         .countDocuments(document(call.call().arg(0), "filter"), new CountOptions().limit(2));
                 if (matches != 1) {
@@ -798,7 +802,15 @@ public final class MongoEngine implements SessionEngine {
                     MongoCollection<Document> collection = db(call.database()).getCollection(call.collection());
                     Document filter = document(call.call().arg(0), "filter");
                     long changed;
-                    if (call.call().name().equals("updateOne")) {
+                    if (call.call().name().equals("insertOne")) {
+                        Document toInsert = document(call.call().arg(0), "document");
+                        if (s == null) {
+                            collection.insertOne(toInsert);
+                        } else {
+                            collection.insertOne(s, toInsert);
+                        }
+                        changed = 1;
+                    } else if (call.call().name().equals("updateOne")) {
                         Document update = document(call.call().arg(1), "update");
                         UpdateResult result = s == null ? collection.updateOne(filter, update) : collection.updateOne(s, filter, update);
                         changed = result.getMatchedCount();

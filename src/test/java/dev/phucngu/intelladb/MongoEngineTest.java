@@ -16,6 +16,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -211,6 +212,33 @@ class MongoEngineTest {
         assertFalse(failed.isSuccessful());
         assertTrue(failed.text.startsWith("No document matched"), failed.text);
         assertEquals("Kit", run("db.pets.find({_id: 3})").rows.getFirst()[1]);
+    }
+
+    @Test
+    void newRowsAreInserted() {
+        LinkedHashMap<String, Object> values = new LinkedHashMap<>();
+        values.put("_id", 99);
+        values.put("name", "Bo");
+        values.put("age", "7");
+        String insert = DIALECT.insertStatement(DATABASE, "pets", values);
+        assertTrue(insert.startsWith("db.getSiblingDB(\"" + DATABASE + "\").getCollection(\"pets\").insertOne("), insert);
+        SqlResult applied = session.applyRowUpdates(List.of(insert));
+        assertTrue(applied.isSuccessful(), applied.text);
+        Object[] bo = run("db.pets.find({_id: 99})").rows.getFirst();
+        assertEquals("Bo", bo[1]);
+        assertEquals(7, bo[2], "edited text is typed like a shell value");
+
+        // An insert composes with an update in the same all-or-nothing unit.
+        LinkedHashMap<String, Object> another = new LinkedHashMap<>();
+        another.put("_id", 100);
+        another.put("name", "Mo");
+        String rename = DIALECT.updateStatement(DATABASE, "pets", new RowUpdates.Edit(
+                Map.of("name", "Bob"), Map.of("_id", 99), Map.of("name", "Bo")));
+        assertTrue(session.applyRowUpdates(List.of(rename, DIALECT.insertStatement(DATABASE, "pets", another)))
+                .isSuccessful());
+        assertEquals(5, run("db.pets.find()").rows.size());
+        assertEquals("Bob", run("db.pets.find({_id: 99})").rows.getFirst()[1]);
+        run("db.pets.deleteMany({_id: {$in: [99, 100]}})");
     }
 
     @Test
