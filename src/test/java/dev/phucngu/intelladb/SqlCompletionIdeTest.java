@@ -1,5 +1,7 @@
 package dev.phucngu.intelladb;
 
+import com.intellij.codeInsight.completion.CompletionType;
+import com.intellij.codeInsight.template.impl.TemplateSettings;
 import com.intellij.codeInsight.lookup.Lookup;
 import com.intellij.testFramework.fixtures.BasePlatformTestCase;
 import dev.phucngu.intelladb.connection.MySqlDialect;
@@ -143,5 +145,47 @@ public class SqlCompletionIdeTest extends BasePlatformTestCase {
         myFixture.configureByText(IntellaSqlFileType.INSTANCE, "SELECT * FROM t wher<caret>");
         myFixture.completeBasic();
         myFixture.checkResult("SELECT * FROM t where<caret>");
+    }
+
+    public void testPostfixTemplateRewritesThroughTheLookup() {
+        postgres("SELECT users.fr<caret>");
+        myFixture.completeBasic();
+        if (myFixture.getLookup() != null) { // more than one match: choose the postfix item
+            List<String> items = myFixture.getLookupElementStrings();
+            assertNotNull(items);
+            myFixture.getLookup().setCurrentItem(myFixture.getLookupElements()[items.indexOf("* from users")]);
+            myFixture.finishLookup(Lookup.NORMAL_SELECT_CHAR);
+        } // a single match is inserted straight away
+        myFixture.checkResult("SELECT * from users<caret>");
+    }
+
+    public void testSmartCompletionSuggestsMatchingColumns() {
+        SchemaCatalog catalog = new SchemaCatalog(List.of(
+                new SchemaCatalog.Schema("public", List.of(typedTable("users",
+                        "id:int4", "email:varchar(255)", "note:text")))));
+        console("SELECT * FROM users WHERE email = <caret>",
+                CompletionScope.of(new PostgresDialect(), catalog, "public"));
+        myFixture.complete(CompletionType.SMART, 1);
+        // text is a string category too; only the integer column is out
+        assertSameElements(myFixture.getLookupElementStrings(), "email", "note");
+    }
+
+    public void testLiveTemplatesAreDiscovered() {
+        TemplateSettings settings = TemplateSettings.getInstance();
+        assertNotNull("the shipped SQL live templates must be found on the plugin classpath",
+                settings.getTemplate("sel", "Intella DB"));
+        assertEquals("select * from $table$$END$;", settings.getTemplate("sel", "Intella DB").getString());
+        for (String key : List.of("selw", "selc", "lim", "ins", "upd", "del", "tab", "view", "col")) {
+            assertNotNull(key + " is missing", settings.getTemplate(key, "Intella DB"));
+        }
+    }
+
+    private static TableMeta typedTable(String name, String... columns) {
+        List<ColumnMeta> metas = new java.util.ArrayList<>();
+        for (int i = 0; i < columns.length; i++) {
+            String[] parts = columns[i].split(":", 2);
+            metas.add(new ColumnMeta(parts[0], parts[1], true, "", i + 1, i == 0, ""));
+        }
+        return new TableMeta(name, TableMeta.Kind.TABLE, metas, "");
     }
 }

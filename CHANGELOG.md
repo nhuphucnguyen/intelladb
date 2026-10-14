@@ -3,6 +3,21 @@
 ## Unreleased
 
 ### Added
+- **Joins complete without foreign keys**: when no declared key links two tables, naming does —
+  identical column names, and `id` against `<singular table>_id` (a `purchases` table joins on
+  `purchase_id`). Name coincidences rank below declared keys, and integer keys above string ones.
+- **Smart completion (Ctrl+Shift+Space)** at one side of a comparison suggests the columns whose
+  type matches the other side — `WHERE u.email = ` offers the string columns.
+- **CTEs and subqueries complete like tables**: `WITH recent AS (SELECT id, email FROM users)
+  SELECT … FROM recent` — `recent`'s columns are offered (a `*` expands through the catalog), and
+  so are a subquery alias's (`FROM (SELECT …) x` → `x.` columns).
+- **INSERT column lists offer every column at once** (`id, email, created_at` as a single item),
+  and the alias the engine would generate is offered while you type it after a table.
+- **Postfix templates in the lookup**: `users.from` completes to `SELECT * FROM users` — the whole
+  dotted chain is rewritten. `.cfrom` lists all columns, `.afrom` lists them aliased, `.join` adds
+  the JOIN with its ON condition, `.cast` wraps the reference.
+- **SQL live templates**: `sel`, `selw`, `selc`, `lim`, `ins`, `upd`, `del`, `tab`, `view`, `col` —
+  the database-tools statement starters, scoped to SQL consoles and injected SQL.
 - **The explorer follows IntelliJ's database-view grammar.** The toolbar is now
   `[+ ▾][Data Sources…][Refresh][Disconnect][SQL Console][Edit Data][Go to DDL][Eye ▾]`:
   "+" drafts a new connection of the chosen dialect directly, Edit Data and Go to DDL act

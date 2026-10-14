@@ -45,7 +45,7 @@ class SuggestionEngineTest {
     private static List<Suggestion> suggest(String sql, CompletionScope scope) {
         int caret = sql.indexOf('|');
         String text = sql.substring(0, caret) + sql.substring(caret + 1);
-        return SuggestionEngine.suggest(CursorAnalyzer.analyze(text, caret, scope.splitterOptions()), scope);
+        return SuggestionEngine.suggest(CursorAnalyzer.analyze(text, caret, scope), scope);
     }
 
     private static List<Suggestion> postgres(String sql) {
@@ -181,12 +181,17 @@ class SuggestionEngineTest {
     @Test
     void joinSuggestsRelatedTablesWithTheirCondition() {
         List<Suggestion> s = app("SELECT * FROM users u JOIN |");
-        assertEquals(Set.of("orders o ON o.user_id = u.id"), inserts(s, Kind.JOIN));
+        assertTrue(inserts(s, Kind.JOIN).contains("orders o ON o.user_id = u.id"));
+        // Name coincidences (both sides have an id) join too, ranked below the declared key.
+        Suggestion foreignKey = s.stream()
+                .filter(x -> x.kind() == Kind.JOIN && x.insertText().contains("user_id")).findFirst().orElseThrow();
+        assertEquals(110, foreignKey.priority());
+        assertTrue(s.stream().filter(x -> x.kind() == Kind.JOIN && x != foreignKey)
+                .allMatch(x -> x.priority() < foreignKey.priority()));
         // Referenced rather than referencing: the condition reads from the new table's side.
-        assertEquals(Set.of("users u ON u.id = o.user_id"), inserts(app("SELECT * FROM orders o JOIN |"), Kind.JOIN));
+        assertTrue(inserts(app("SELECT * FROM orders o JOIN |"), Kind.JOIN).contains("users u ON u.id = o.user_id"));
         // Related joins rank above the plain table list, which still has everything (aliased, not clashing with u).
-        Suggestion join = s.stream().filter(x -> x.kind() == Kind.JOIN).findFirst().orElseThrow();
-        assertTrue(s.stream().filter(x -> x.kind() == Kind.TABLE).allMatch(x -> x.priority() < join.priority()));
+        assertTrue(s.stream().filter(x -> x.kind() == Kind.TABLE).allMatch(x -> x.priority() < foreignKey.priority()));
         assertTrue(inserts(s, Kind.TABLE).containsAll(Set.of("orders o", "uploads u1", "users u1")));
     }
 
@@ -211,8 +216,11 @@ class SuggestionEngineTest {
                 inserts(app("SELECT * FROM employees e JOIN employees m ON |"), Kind.JOIN_CONDITION));
         assertEquals(Set.of("orders.user_id = users.id"),
                 inserts(app("SELECT * FROM users JOIN orders ON |"), Kind.JOIN_CONDITION));
-        // Only tables before the join count.
-        assertTrue(inserts(app("SELECT * FROM uploads x JOIN orders o ON |"), Kind.JOIN_CONDITION).isEmpty());
+        // Only tables before the join count — unrelated tables get name coincidences, never a key.
+        List<Suggestion> unrelated = app("SELECT * FROM uploads x JOIN orders o ON |");
+        assertTrue(inserts(unrelated, Kind.JOIN_CONDITION).stream().noneMatch(c -> c.contains("user_id")));
+        assertTrue(unrelated.stream().filter(x -> x.kind() == Kind.JOIN_CONDITION)
+                .allMatch(x -> x.priority() < 120));
     }
 
     @Test

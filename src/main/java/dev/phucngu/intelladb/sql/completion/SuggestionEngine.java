@@ -3,6 +3,8 @@ package dev.phucngu.intelladb.sql.completion;
 import dev.phucngu.intelladb.schema.ColumnMeta;
 import dev.phucngu.intelladb.schema.SchemaCatalog;
 import dev.phucngu.intelladb.schema.TableMeta;
+import dev.phucngu.intelladb.sql.completion.CursorContext.DerivedTable;
+import dev.phucngu.intelladb.sql.completion.CursorContext.Operand;
 import dev.phucngu.intelladb.sql.completion.CursorContext.TableReference;
 import dev.phucngu.intelladb.sql.completion.Suggestion.Kind;
 import org.jetbrains.annotations.NotNull;
@@ -30,6 +32,7 @@ public final class SuggestionEngine {
     private static final int RELATED_JOINS = 110;
     private static final int PRIMARY = 100;
     private static final int SECONDARY = 80;
+    private static final int ALIAS_SUGGESTIONS = 40;
     private static final int OTHER_SCHEMA = 60;
     private static final int FUNCTIONS = 50;
     private static final int BACKGROUND_KEYWORDS = 10;
@@ -51,8 +54,21 @@ public final class SuggestionEngine {
     }
 
     public static @NotNull List<Suggestion> suggest(@NotNull CursorContext context, @NotNull CompletionScope scope) {
+        return suggest(context, scope, false);
+    }
+
+    /**
+     * Smart completion ({@code Ctrl+Shift+Space}): only what the position asks for — at a
+     * comparison's empty side, the columns whose type matches the other side's.
+     */
+    public static @NotNull List<Suggestion> suggest(@NotNull CursorContext context, @NotNull CompletionScope scope,
+                                                    boolean smart) {
         SuggestionEngine engine = new SuggestionEngine(context, scope);
-        engine.collect();
+        if (smart) {
+            engine.collectSmart();
+        } else {
+            engine.collect();
+        }
         return List.copyOf(engine.out.values());
     }
 
@@ -66,7 +82,10 @@ public final class SuggestionEngine {
         }
         switch (context.clause()) {
             case STATEMENT_START -> keywords(scope.vocabulary().statementStarts(), PRIMARY);
-            case KEYWORD -> keywords(scope.vocabulary().keywords(), PRIMARY);
+            case KEYWORD -> {
+                keywords(scope.vocabulary().keywords(), PRIMARY);
+                aliasSuggestions();
+            }
             case TABLE -> {
                 if (joining()) {
                     relatedJoins();
@@ -95,6 +114,15 @@ public final class SuggestionEngine {
                 ResolvedTable target = context.insertTarget() == null ? null : resolve(context.insertTarget());
                 if (target != null) {
                     columns(target, PRIMARY);
+                    // Every column at once (IDEA's "insert the whole column list" item). Its lookup
+                    // starts with the first column, so it only matches at the list's start.
+                    List<String> names = target.table().columns.stream()
+                            .map(c -> quote(c.name)).toList();
+                    if (names.size() > 1) {
+                        String list = String.join(", ", names);
+                        add(new Suggestion(list, list, Kind.COLUMN_LIST,
+                                target.table().columns.size() + " columns", target.label(), PRIMARY + 5));
+                    }
                 }
             }
             case TYPE -> {
@@ -124,6 +152,7 @@ public final class SuggestionEngine {
             ResolvedTable table = resolve(new TableReference(qualifier.get(qualifier.size() - 2), last, null));
             if (table != null) {
                 columns(table, PRIMARY);
+                postfixTemplates(qualifier.get(qualifier.size() - 2) + "." + last, table);
             }
             return;
         }
@@ -132,6 +161,7 @@ public final class SuggestionEngine {
             for (ResolvedTable t : tablesInScope()) {
                 if (last.equalsIgnoreCase(t.label()) || (t.alias() == null && last.equalsIgnoreCase(t.table().name))) {
                     columns(t, PRIMARY);
+                    postfixTemplates(last, t);
                     found = true;
                 }
             }
@@ -139,6 +169,7 @@ public final class SuggestionEngine {
                 ResolvedTable table = resolve(new TableReference(null, last, null));
                 if (table != null) {
                     columns(table, PRIMARY);
+                    postfixTemplates(last, table);
                 }
             }
         }
@@ -153,11 +184,177 @@ public final class SuggestionEngine {
         }
     }
 
+    // ------------------------------------------------------------------ smart completion
+
+    /** Only the comparison-matched columns; anything else stays for basic completion. */
+    private void collectSmart() {
+        Operand expected = context.expected();
+        String category = expected == null ? null : categoryOf(expected);
+        if (category == null || context.clause() != CursorContext.Clause.EXPRESSION) {
+            return;
+        }
+        for (ResolvedTable t : tablesInScope()) {
+            for (ColumnMeta column : t.table().columns) {
+                if (category.equalsIgnoreCase(category(column.typeName))) {
+                    add(new Suggestion(column.name, quote(column.name),
+                            column.primaryKey ? Kind.KEY_COLUMN : Kind.COLUMN,
+                            column.typeName, t.label(), PRIMARY));
+                }
+            }
+        }
+    }
+
+    /** The type category the other side of the comparison has. */
+    private @Nullable String categoryOf(@NotNull Operand operand) {
+        if (operand.literal() != null) {
+            return operand.literal();
+        }
+        if (operand.column() == null) {
+            return null;
+        }
+        if (operand.table() != null) {
+            ResolvedTable table = null;
+            for (ResolvedTable t : tablesInScope()) { // the qualifier is usually an alias: u.email
+                if (t.label().equalsIgnoreCase(operand.table().name())) {
+                    table = t;
+                    break;
+                }
+            }
+            if (table == null) {
+                table = resolve(operand.table());
+            }
+            if (table != null) {
+                for (ColumnMeta column : table.table().columns) {
+                    if (column.name.equalsIgnoreCase(operand.column())) {
+                        return category(column.typeName);
+                    }
+                }
+            }
+            return null;
+        }
+        for (ResolvedTable t : tablesInScope()) { // an unqualified column: find it in any table
+            for (ColumnMeta column : t.table().columns) {
+                if (column.name.equalsIgnoreCase(operand.column())) {
+                    return category(column.typeName);
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Coarse type family used to match the two sides of a comparison. */
+    static @NotNull String category(@NotNull String typeName) {
+        String type = typeName.toLowerCase(Locale.ROOT);
+        int paren = type.indexOf('(');
+        if (paren > 0) {
+            type = type.substring(0, paren);
+        }
+        if (Set.of("int", "int2", "int4", "int8", "integer", "bigint", "smallint", "tinyint", "mediumint",
+                "serial", "bigserial", "smallserial").contains(type)) {
+            return "int";
+        }
+        if (Set.of("char", "character", "varchar", "character varying", "text", "citext", "bpchar", "nchar",
+                "nvarchar", "uuid", "enum", "json", "jsonb", "clob", "set").contains(type)) {
+            return "string";
+        }
+        if (Set.of("bool", "boolean", "bit").contains(type)) {
+            return "bool";
+        }
+        if (Set.of("date", "time", "timetz", "timestamp", "timestamptz", "datetime", "interval", "year")
+                .contains(type)) {
+            return "date";
+        }
+        if (Set.of("numeric", "decimal", "float", "float4", "float8", "double", "double precision", "real",
+                "money").contains(type)) {
+            return "numeric";
+        }
+        return "other";
+    }
+
+    // ------------------------------------------------------------------ postfix templates
+
+    /** {@code table.fro|} → {@code * from table}: the IDEA postfix templates, ours to insert. */
+    private void postfixTemplates(@NotNull String qualifierText, @NotNull ResolvedTable table) {
+        String prefix = context.prefix().toLowerCase(Locale.ROOT);
+        if (prefix.isEmpty()) {
+            return;
+        }
+        String q = quote(qualifierText);
+        if ("from".startsWith(prefix)) {
+            add(postfix("from", "* from " + q, table));
+        }
+        if ("cfrom".startsWith(prefix)) {
+            String columns = table.table().columns.stream().map(c -> quote(c.name))
+                    .reduce((a, b) -> a + ", " + b).orElse("");
+            if (!columns.isEmpty()) {
+                add(postfix("cfrom", columns + " from " + q, table));
+            }
+        }
+        if ("afrom".startsWith(prefix)) {
+            StringBuilder columns = new StringBuilder();
+            for (ColumnMeta column : table.table().columns) {
+                if (!columns.isEmpty()) {
+                    columns.append(", ");
+                }
+                columns.append(quote(column.name)).append(" as ")
+                        .append(quote(columnAliasFor(column.name)));
+            }
+            if (!columns.isEmpty()) {
+                add(postfix("afrom", columns + " from " + q, table));
+            }
+        }
+        if ("cast".startsWith(prefix)) {
+            add(new Suggestion("cast", "cast(" + q + " as )", Kind.POSTFIX, "", table.label(),
+                    JOIN_CONDITIONS, 1));
+        }
+        if ("join".startsWith(prefix)) {
+            for (Suggestion join : joinSuggestionsFor(table)) {
+                if (join.lookup().equalsIgnoreCase(table.table().name)) {
+                    continue; // joining a table to itself is not what ".join" is for
+                }
+                add(new Suggestion("join", "* from " + q + " join " + join.insertText(), Kind.POSTFIX,
+                        join.detail(), join.location(), join.priority() + 1));
+            }
+        }
+    }
+
+    private @NotNull Suggestion postfix(@NotNull String keyword, @NotNull String insert, @NotNull ResolvedTable table) {
+        return new Suggestion(keyword, insert, Kind.POSTFIX, "", table.label(), JOIN_CONDITIONS);
+    }
+
+    /** An alias for a column: the first letters of its words ({@code created_at} → {@code ca}). */
+    private @NotNull String columnAliasFor(@NotNull String name) {
+        return TableAliases.aliasFor(name, Set.of(context.prefix().toLowerCase(Locale.ROOT)),
+                scope.vocabulary().keywords());
+    }
+
+    // ------------------------------------------------------------------ suggestions by kind
+
     private void keywords(@NotNull Collection<String> words, int priority) {
         for (String word : words) {
             String text = cased(word);
             add(new Suggestion(text, text, Kind.KEYWORD, "", "", priority));
         }
+    }
+
+    /**
+     * After a complete table reference in FROM/JOIN, where the next word is its alias: the alias
+     * the engine itself would insert ({@code users u} — so typing {@code u|} offers {@code u}).
+     */
+    private void aliasSuggestions() {
+        if (context.prefix().isEmpty() || context.tables().isEmpty() || context.aliasFollows()) {
+            return;
+        }
+        boolean aliasable = "from".equals(context.keyword()) || joining();
+        if (!aliasable) {
+            return;
+        }
+        TableReference last = context.tables().get(context.tables().size() - 1);
+        String alias = aliasFor(last.name());
+        if (!alias.equalsIgnoreCase(context.prefix())) {
+            return; // what is being typed is not the alias we would generate
+        }
+        add(new Suggestion(alias, alias, Kind.ALIAS, last.name(), "", ALIAS_SUGGESTIONS));
     }
 
     /** Tables of the current schema as plain names, others schema-qualified. */
@@ -178,8 +375,13 @@ public final class SuggestionEngine {
 
     // ------------------------------------------------------------------ joins & aliases
 
-    /** One foreign key between two tables, as the column pairs of a join condition. */
-    private record Relation(@NotNull List<String> newColumns, @NotNull List<String> existingColumns) {
+    /**
+     * One link between two tables: the column pairs of a join condition, and how sure we are of
+     * it — a declared foreign key, or a name coincidence IDEA-style (same-named columns, or
+     * {@code id} against {@code <table>_id}), which ranks below every real key.
+     */
+    private record Relation(@NotNull List<String> newColumns, @NotNull List<String> existingColumns,
+                            int rankDelta) {
         @NotNull String condition(@NotNull String newLabel, @NotNull String existingLabel,
                                   @NotNull UnaryOperator<String> quote) {
             StringBuilder sb = new StringBuilder();
@@ -196,22 +398,109 @@ public final class SuggestionEngine {
 
     /**
      * Foreign keys linking {@code table} (in {@code schema}) with {@code existing}, in either
-     * direction: the new table referencing it, or it referencing the new table.
+     * direction — and when there is none, the links naming suggests: identical column names, and
+     * {@code id} against the {@code <singularized table>_id} of either side.
      */
     private static @NotNull List<Relation> relations(@NotNull String schema, @NotNull TableMeta table,
                                                      @NotNull ResolvedTable existing) {
         List<Relation> relations = new ArrayList<>();
         for (TableMeta.ForeignKey fk : table.foreignKeys) {
             if (references(fk, existing.schema(), existing.table())) {
-                relations.add(new Relation(fk.columns(), fk.refColumns()));
+                relations.add(new Relation(fk.columns(), fk.refColumns(), typeDelta(fk, table, existing.table())));
             }
         }
         for (TableMeta.ForeignKey fk : existing.table().foreignKeys) {
             if (references(fk, schema, table)) {
-                relations.add(new Relation(fk.refColumns(), fk.columns()));
+                relations.add(new Relation(fk.refColumns(), fk.columns(), typeDelta(fk, existing.table(), table)));
+            }
+        }
+        if (!relations.isEmpty()) {
+            return relations;
+        }
+        for (ColumnMeta candidate : table.columns) {
+            if (candidate.name.equals("id")) {
+                for (ColumnMeta other : existing.table().columns) {
+                    // table.id ↔ existing.<table>_id: the <…>_id column names this table
+                    String stem = singularStem(other.name);
+                    if (stem != null && stemMatches(table.name, stem)) {
+                        relations.add(new Relation(List.of(candidate.name), List.of(other.name), -15));
+                    }
+                }
+            }
+            if (endsWithId(candidate.name)) {
+                String stem = singularStem(candidate.name);
+                for (ColumnMeta other : existing.table().columns) {
+                    if (other.name.equals("id") && stemMatches(existing.table().name, stem)) {
+                        relations.add(new Relation(List.of(candidate.name), List.of(other.name), -15));
+                    }
+                }
+            }
+            for (ColumnMeta other : existing.table().columns) { // the same column name on both sides
+                if (other.name.equalsIgnoreCase(candidate.name)) {
+                    relations.add(new Relation(List.of(candidate.name), List.of(other.name), -10));
+                }
             }
         }
         return relations;
+    }
+
+    /** IDEA ranks integer joins above string joins; everything real stays above the fuzzy ones. */
+    private static int typeDelta(@NotNull TableMeta.ForeignKey fk, @NotNull TableMeta from, @NotNull TableMeta to) {
+        String category = null;
+        for (String column : fk.columns()) {
+            String each = columnCategory(from, column);
+            if (each == null) {
+                return -10;
+            }
+            if (category == null) {
+                category = each;
+            } else if (!category.equals(each)) {
+                return -10;
+            }
+        }
+        return switch (category == null ? "" : category) {
+            case "int" -> 0;
+            case "string" -> -5;
+            default -> -10;
+        };
+    }
+
+    private static @Nullable String columnCategory(@NotNull TableMeta table, @NotNull String column) {
+        for (ColumnMeta c : table.columns) {
+            if (c.name.equalsIgnoreCase(column)) {
+                return category(c.typeName);
+            }
+        }
+        return null;
+    }
+
+    /** {@code user_id} → {@code user}: the stem before {@code _id}, or null. */
+    private static @Nullable String singularStem(@NotNull String column) {
+        String lower = column.toLowerCase(Locale.ROOT);
+        return lower.endsWith("_id") && lower.length() > 3 ? lower.substring(0, lower.length() - 3) : null;
+    }
+
+    private static boolean endsWithId(@NotNull String column) {
+        return singularStem(column) != null;
+    }
+
+    /** {@code purchases} → {@code purchase}, {@code companies} → {@code company}. */
+    public static @NotNull String singularized(@NotNull String name) {
+        String lower = name.toLowerCase(Locale.ROOT);
+        if (lower.length() > 3 && lower.endsWith("ies")) {
+            return lower.substring(0, lower.length() - 3) + "y";
+        }
+        if (lower.length() > 1 && lower.endsWith("s") && !lower.endsWith("ss") && !lower.endsWith("us")
+                && !lower.endsWith("is")) {
+            return lower.substring(0, lower.length() - 1);
+        }
+        return lower;
+    }
+
+    /** Whether {@code name} plausibly owns the {@code <name>_id} column stem ({@code buses} ↔ {@code bus}). */
+    private static boolean stemMatches(@NotNull String name, @NotNull String stem) {
+        String singular = singularized(name);
+        return singular.endsWith(stem) || singular.startsWith(stem);
     }
 
     private static boolean references(@NotNull TableMeta.ForeignKey fk, @NotNull String schema,
@@ -230,18 +519,36 @@ public final class SuggestionEngine {
         if (catalog == null) {
             return;
         }
-        for (ResolvedTable existing : tablesInScope()) {
+        for (Suggestion join : joinSuggestionsFor(tablesInScope())) {
+            add(join);
+        }
+    }
+
+    /** The whole-statement join suggestions ({@code orders o ON …}) for the tables in scope. */
+    private @NotNull List<Suggestion> joinSuggestionsFor(@NotNull List<ResolvedTable> inScope) {
+        SchemaCatalog catalog = scope.catalog();
+        List<Suggestion> suggestions = new ArrayList<>();
+        if (catalog == null) {
+            return suggestions;
+        }
+        for (ResolvedTable existing : inScope) {
             for (SchemaCatalog.Schema schema : catalog.schemas()) {
                 for (TableMeta table : schema.tables()) {
                     for (Relation relation : relations(schema.name(), table, existing)) {
                         String alias = aliasFor(table.name);
                         String insert = tableText(schema, table) + " " + alias + " ON "
                                 + relation.condition(alias, quote(existing.label()), this::quote);
-                        add(new Suggestion(table.name, insert, Kind.JOIN, "", schema.name(), RELATED_JOINS));
+                        suggestions.add(new Suggestion(table.name, insert, Kind.JOIN, "", schema.name(),
+                                RELATED_JOINS + relation.rankDelta()));
                     }
                 }
             }
         }
+        return suggestions;
+    }
+
+    private @NotNull List<Suggestion> joinSuggestionsFor(@NotNull ResolvedTable table) {
+        return joinSuggestionsFor(List.of(table));
     }
 
     /** {@code JOIN t ON |}: the foreign-key conditions between t and the tables before it. */
@@ -260,7 +567,8 @@ public final class SuggestionEngine {
             }
             for (Relation relation : relations(joined.schema(), joined.table(), existing)) {
                 String condition = relation.condition(quote(joined.label()), quote(existing.label()), this::quote);
-                add(new Suggestion(condition, condition, Kind.JOIN_CONDITION, "", "", JOIN_CONDITIONS));
+                add(new Suggestion(condition, condition, Kind.JOIN_CONDITION, "", "",
+                        JOIN_CONDITIONS + relation.rankDelta()));
             }
         }
     }
@@ -353,8 +661,17 @@ public final class SuggestionEngine {
         return resolved;
     }
 
-    /** Finds a referenced table: in its schema if qualified, else the current schema first, then any. */
+    /**
+     * Finds a referenced table: the statement's own CTEs and subquery aliases first, then the
+     * catalog — in its schema if qualified, else the current schema first, then any.
+     */
     private @Nullable ResolvedTable resolve(@NotNull TableReference reference) {
+        for (DerivedTable derived : context.derivedTables()) {
+            if (derived.label().equalsIgnoreCase(reference.name())) {
+                TableMeta meta = new TableMeta(derived.label(), TableMeta.Kind.TABLE, derived.columns(), "");
+                return new ResolvedTable("", meta, reference.alias());
+            }
+        }
         SchemaCatalog catalog = scope.catalog();
         if (catalog == null) {
             return null;

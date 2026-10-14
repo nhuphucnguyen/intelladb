@@ -1,5 +1,8 @@
 package dev.phucngu.intelladb;
 
+import dev.phucngu.intelladb.schema.IdentifierQuoting;
+import dev.phucngu.intelladb.sql.SqlVocabulary;
+import dev.phucngu.intelladb.sql.completion.CompletionScope;
 import dev.phucngu.intelladb.sql.completion.CursorAnalyzer;
 import dev.phucngu.intelladb.sql.completion.CursorContext;
 import dev.phucngu.intelladb.sql.completion.CursorContext.Clause;
@@ -16,12 +19,15 @@ class CursorAnalyzerTest {
 
     /** Analyzes {@code sql} with the caret at the '|' marker. */
     private static CursorContext at(String sql) {
-        return at(sql, SqlSplitter.Options.POSTGRES);
+        int caret = sql.indexOf('|');
+        return CursorAnalyzer.analyze(sql.substring(0, caret) + sql.substring(caret + 1), caret,
+                CompletionScope.offline());
     }
 
     private static CursorContext at(String sql, SqlSplitter.Options options) {
         int caret = sql.indexOf('|');
-        return CursorAnalyzer.analyze(sql.substring(0, caret) + sql.substring(caret + 1), caret, options);
+        return CursorAnalyzer.analyze(sql.substring(0, caret) + sql.substring(caret + 1), caret,
+                new CompletionScope(null, null, SqlVocabulary.ANSI, IdentifierQuoting::quote, options, true));
     }
 
     @Test

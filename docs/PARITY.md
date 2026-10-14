@@ -102,6 +102,12 @@ Legend: ✅ done · 🟡 partial · ❌ missing
 | Syntax highlighting (PG/MySQL/Mongo lexers) | ✅ | |
 | Completion: keywords/tables/columns, `.` popup | ✅ | `CursorAnalyzer`/`SuggestionEngine` |
 | FK join completion + auto aliases | ✅ | |
+| Fuzzy join completion (no FK: same names, `id` ↔ `<table>_id`) | ✅ | ranked below declared keys, int > string |
+| Smart completion (comparison side by type) | ✅ | Ctrl+Shift+Space |
+| CTE / subquery-alias column completion | ✅ | `WITH …` and `FROM (…) x` |
+| INSERT column list all-at-once + alias suggestions | ✅ | |
+| Postfix templates (`.from` `.cfrom` `.afrom` `.join` `.cast`) | ✅ | as lookup items rewriting the chain |
+| Live templates (`sel`…`col`) | ✅ | scoped via `TemplateContextType` |
 | Mongo shell completion | ✅ | |
 | Liquibase XML SQL injection | ✅ | |
 | Real PSI (statements/clauses) | ❌ | flat parser today; gates the items below |
