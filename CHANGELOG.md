@@ -25,6 +25,11 @@
   (n / Σ / avg / min / max per numeric column over your selection).
 - **Preview Changes** (next to Submit) shows the exact statements Submit would run, with
   Copy — before anything touches the database.
+- **A connection can own several named consoles.** "New SQL Console" on any tree node opens
+  a fresh one; the header's Consoles ▾ lists them all (Jump to Query Console) with Rename;
+  the mode popup beside Execute now also runs "Execute Selection as Single Statement" and
+  "Execute Script" right away; and a connection selector beside the schema selector points
+  the console at another database of the same kind.
 - **SQLite and H2 connections.** Both drivers are bundled, so an embedded database needs no
   server: point the Database field at a file path (`app.sqlite3`, `~/db/app`), leave it
   empty for an in-memory database, or use URL-only mode for a full JDBC URL. A SQLite file

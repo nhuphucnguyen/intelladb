@@ -63,8 +63,10 @@ Legend: ✅ done · 🟡 partial · ❌ missing
 | Feature | Status | Notes |
 |---|---|---|
 | SQL console per connection | ✅ | `SqlConsole` (LightVirtualFile, gutter markers, timings) |
-| Multiple named consoles per connection | ❌ | single console keyed by config id |
-| Multi-statement execution + script mode | ✅ | `SqlSplitter`, Playground/Script run modes |
+| Multiple named consoles per connection | ✅ | `ConsoleStore` by console id, rename, jump-to-console popup, new/duplicate from tree |
+| Multi-statement execution + script mode | ✅ | `SqlSplitter`, Playground/Script run modes, Execute Selection as Single Statement |
+| Execute ▾ (modes + selection-as-one-statement) | ✅ | mode popup next to Execute, each entry runs right away |
+| Connection selector beside the schema selector | ✅ | rebinds the console to a same-language connection |
 | Transactions (Auto/Manual, commit/rollback) | ✅ | savepoint-aware row-update unit |
 | Query history | ✅ | `QueryHistory` + view, gzip JSON store |
 | `?` parameter prompts | ❌ | needs `PreparedStatement` path |

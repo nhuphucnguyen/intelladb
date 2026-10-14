@@ -157,13 +157,13 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
 
     // ------------------------------------------------------------------ tab management
 
-    /** One console per connection; it lives on (text included) after its tab is closed. */
+    /** Every live console by its {@link ConsoleStore} id; they live on after their tabs close. */
     private final java.util.Map<String, SqlConsole> consoles = new java.util.HashMap<>();
 
     /**
-     * Opens (or focuses) the SQL console for the connection as an editor tab — the way
-     * IntelliJ's database tools do it: a text editor with a console toolbar, results in
-     * the DB Services tool window.
+     * Opens (or focuses) the connection's default console — the first one it owns — as an
+     * editor tab, the way IntelliJ's database tools do it: a text editor with a console
+     * toolbar, results in the DB Services tool window.
      */
     public @NotNull SqlConsole openConsole(@NotNull DbConfig config) {
         return openConsole(config, null);
@@ -171,7 +171,10 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
 
     /** As {@link #openConsole(DbConfig)}; a non-null {@code sql} replaces the console text. */
     public @NotNull SqlConsole openConsole(@NotNull DbConfig config, @Nullable String sql) {
-        return openConsole(config, sql, null, null);
+        ConsoleStore store = ConsoleStore.getInstance(project);
+        java.util.List<ConsoleStore.ConsoleState> states = store.ofConnection(config.id);
+        ConsoleStore.ConsoleState state = states.isEmpty() ? store.create(config.id) : states.get(0);
+        return openConsoleState(config, state, sql);
     }
 
     /**
@@ -181,23 +184,48 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
      */
     public @NotNull SqlConsole openConsole(@NotNull DbConfig config, @Nullable String sql, @Nullable String database,
                                            @Nullable String schema) {
-        return openConsole(config, sql, database, schema, true);
+        ConsoleStore store = ConsoleStore.getInstance(project);
+        java.util.List<ConsoleStore.ConsoleState> states = store.ofConnection(config.id);
+        ConsoleStore.ConsoleState state = states.isEmpty() ? store.create(config.id) : states.get(0);
+        return openConsole(config, state, sql, database, schema, true);
+    }
+
+    /** Opens (or focuses) one of the connection's saved consoles. */
+    public @NotNull SqlConsole openConsoleState(@NotNull DbConfig config,
+                                                @NotNull ConsoleStore.ConsoleState state) {
+        return openConsoleState(config, state, null);
+    }
+
+    private @NotNull SqlConsole openConsoleState(@NotNull DbConfig config,
+                                                 @NotNull ConsoleStore.ConsoleState state,
+                                                 @Nullable String sql) {
+        return openConsole(config, state, sql, null, null, true);
+    }
+
+    /** Opens a brand-new named console for the connection, optionally scoped to a schema. */
+    public @NotNull SqlConsole newConsole(@NotNull DbConfig config, @Nullable String database,
+                                          @Nullable String schema) {
+        return openConsole(config, ConsoleStore.getInstance(project).create(config.id),
+                null, database, schema, true);
     }
 
     /** Reopens (without focus) the console tabs that were open when the IDE last closed. */
     public void restoreConsoles() {
-        for (String id : ConsoleStore.getInstance(project).openConsoles()) {
-            DbConfig config = manager.findConfig(id);
+        ConsoleStore store = ConsoleStore.getInstance(project);
+        for (String id : store.openConsoles()) {
+            ConsoleStore.ConsoleState state = store.find(id);
+            DbConfig config = state == null ? null : manager.findConfig(state.connectionId);
             if (config != null) {
-                openConsole(config, null, null, null, false);
+                openConsole(config, state, null, null, null, false);
             }
         }
     }
 
-    private @NotNull SqlConsole openConsole(@NotNull DbConfig config, @Nullable String sql, @Nullable String database,
+    private @NotNull SqlConsole openConsole(@NotNull DbConfig config, @NotNull ConsoleStore.ConsoleState state,
+                                            @Nullable String sql, @Nullable String database,
                                             @Nullable String schema, boolean focus) {
-        SqlConsole console = consoles.computeIfAbsent(config.id, id -> {
-            SqlConsole created = new SqlConsole(project, this, config);
+        SqlConsole console = consoles.computeIfAbsent(state.id, id -> {
+            SqlConsole created = new SqlConsole(project, this, config, state.id, state.name);
             Disposer.register(this, created);
             return created;
         });

@@ -90,10 +90,13 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
     private final Project project;
     private final DbExplorerPanel explorer;
     /**
-     * The connection as it was when the console opened; {@link #config()} is the current one
-     * (editing a connection saves a new {@link DbConfig} under the same id).
+     * The connection as it was when the console opened or was last rebound; {@link #config()}
+     * is the current one (editing a connection saves a new {@link DbConfig} under the same id).
      */
-    private final DbConfig initialConfig;
+    private DbConfig initialConfig;
+    /** This console's identity in the {@link ConsoleStore} — one connection can own several. */
+    private final String id;
+    private String name;
     private final LightVirtualFile file;
     private final Document document;
     private final ExecutionMarkers markers;
@@ -108,10 +111,13 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
     private volatile boolean running;
     private volatile boolean cancelled;
 
-    SqlConsole(@NotNull Project project, @NotNull DbExplorerPanel explorer, @NotNull DbConfig config) {
+    SqlConsole(@NotNull Project project, @NotNull DbExplorerPanel explorer, @NotNull DbConfig config,
+               @NotNull String id, @NotNull String name) {
         this.project = project;
         this.explorer = explorer;
         this.initialConfig = config;
+        this.id = id;
+        this.name = name;
         this.txMode = config.autoCommit ? TxMode.AUTO : TxMode.MANUAL;
         DbDialect dialect = config.dialect();
         boolean mongo = dialect.consoleLanguage() == ConsoleLanguage.MONGO_SHELL;
@@ -133,7 +139,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
     /** Picks up the text and schema the console had before the IDE restarted; keeps them saved. */
     private void restore() {
         ConsoleStore store = ConsoleStore.getInstance(project);
-        ConsoleStore.ConsoleState saved = store.find(config().id);
+        ConsoleStore.ConsoleState saved = store.find(id);
         if (saved != null) {
             if (!saved.sql.isEmpty()) {
                 WriteCommandAction.runWriteCommandAction(project, () -> document.setText(saved.sql));
@@ -144,7 +150,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         document.addDocumentListener(new com.intellij.openapi.editor.event.DocumentListener() {
             @Override
             public void documentChanged(@NotNull com.intellij.openapi.editor.event.DocumentEvent event) {
-                store.setSql(config().id, document.getText());
+                store.setSql(id, document.getText());
             }
         }, this);
     }
@@ -160,9 +166,38 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         return file;
     }
 
-    /** Tab / tree title, e.g. {@code console [@localhost]}. */
+    /** Tab / tree title, e.g. {@code console [@localhost]} or {@code queries [@localhost]}. */
     @NotNull String title() {
-        return "console [@" + config().name + "]";
+        return name + " [@" + config().name + "]";
+    }
+
+    /** This console's id in the {@link ConsoleStore}. */
+    @NotNull String consoleId() {
+        return id;
+    }
+
+    /** Renames the console (its tab title follows). */
+    public void rename(@NotNull String newName) {
+        if (newName.isBlank() || newName.equals(name)) {
+            return;
+        }
+        name = newName.strip();
+        ConsoleStore.getInstance(project).setName(id, name);
+        FileEditorManager.getInstance(project).updateFilePresentation(file);
+    }
+
+    /** Points the console at another connection (of the same console language); the schema resets. */
+    public void rebind(@NotNull DbConfig config) {
+        if (config.id.equals(initialConfig.id)) {
+            return;
+        }
+        initialConfig = config;
+        txMode = config.autoCommit ? TxMode.AUTO : TxMode.MANUAL;
+        schema = null;
+        database = null;
+        ConsoleStore.getInstance(project).rebind(id, config.id);
+        toolbars.forEach(ActionToolbar::updateActionsImmediately);
+        FileEditorManager.getInstance(project).updateFilePresentation(file); // the [connection] suffix
     }
 
     public @NotNull String sql() {
@@ -182,7 +217,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
     public void setSchema(@Nullable String database, @Nullable String name) {
         this.database = config().allDatabases() ? database : null;
         schema = name;
-        ConsoleStore.getInstance(project).setSchema(config().id, this.database, name);
+        ConsoleStore.getInstance(project).setSchema(id, this.database, name);
         toolbars.forEach(ActionToolbar::updateActionsAsync); // show it now, not on the next UI tick
     }
 
@@ -223,6 +258,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
 
         DefaultActionGroup left = new DefaultActionGroup();
         left.add(execute);
+        left.add(new RunModeAction(editor));
         left.addSeparator();
         left.add(new TxModeAction());
         left.add(new EndTransactionAction(true));
@@ -245,7 +281,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
             }
         });
         left.addSeparator();
-        left.add(new RunModeAction());
+        left.add(new JumpToConsolesAction());
         left.add(new DumbAwareAction("Query History", "Recent queries with their results",
                 AllIcons.Vcs.History) {
             @Override
@@ -261,8 +297,11 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
                 ResultsHub.getInstance(project).reveal(SqlConsole.this);
             }
         });
+        left.addSeparator();
+        left.add(new RenameConsoleAction());
 
         DefaultActionGroup right = new DefaultActionGroup();
+        right.add(new ConnectionAction());
         right.add(new SchemaAction());
 
         ActionToolbar leftBar = ActionManager.getInstance().createActionToolbar("IntellaDbConsole", left, true);
@@ -639,9 +678,30 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         }
     }
 
-    /** "Playground ▾" — statement at caret vs. whole script. */
+    /** Runs the selection as one statement even where the splitter would see several. */
+    private void executeSelectionAsOne(@NotNull Editor editor) {
+        SelectionModel selection = editor.getSelectionModel();
+        List<SqlSplitter.Statement> statements;
+        if (selection.hasSelection()) {
+            String text = document.getText().substring(selection.getSelectionStart(), selection.getSelectionEnd());
+            statements = text.isBlank() ? List.of()
+                    : List.of(new SqlSplitter.Statement(selection.getSelectionStart(), selection.getSelectionEnd(), text));
+        } else {
+            statements = pick(editor); // nothing selected: the statement at the caret
+        }
+        if (statements.isEmpty()) {
+            return;
+        }
+        explorer.withSession(config(), session -> start(session, statements, null));
+    }
+
+    /** "Playground ▾ / Script ▾" — what Execute runs; each entry also runs right away,
+     * plus running the selection as one statement. */
     private final class RunModeAction extends ComboBoxAction {
-        RunModeAction() {
+        private final Editor editor;
+
+        RunModeAction(@NotNull Editor editor) {
+            this.editor = editor;
             setSmallVariant(true);
             getTemplatePresentation().setDescription("What Execute runs");
         }
@@ -650,11 +710,136 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         protected @NotNull DefaultActionGroup createPopupActionGroup(@NotNull JComponent button,
                                                                      @NotNull DataContext context) {
             DefaultActionGroup group = new DefaultActionGroup();
-            for (RunMode mode : RunMode.values()) {
-                group.add(new DumbAwareAction(mode.label, mode.description, null) {
+            group.add(new DumbAwareAction("Execute Playground (statement at caret)",
+                    RunMode.PLAYGROUND.description, null) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e) {
+                    runMode = RunMode.PLAYGROUND;
+                    execute(editor);
+                }
+            });
+            group.add(new DumbAwareAction("Execute Selection as Single Statement",
+                    "Run the selected text as one statement, without splitting it", null) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e) {
+                    executeSelectionAsOne(editor);
+                }
+            });
+            group.add(new DumbAwareAction("Execute Script (whole console)",
+                    RunMode.SCRIPT.description, null) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e) {
+                    runMode = RunMode.SCRIPT;
+                    execute(editor);
+                }
+            });
+            return group;
+        }
+
+        @Override
+        public void update(@NotNull AnActionEvent e) {
+            e.getPresentation().setText(runMode.label);
+            e.getPresentation().setDescription(runMode.description);
+        }
+
+        @Override
+        public @NotNull ActionUpdateThread getActionUpdateThread() {
+            return ActionUpdateThread.EDT;
+        }
+    }
+
+    /** "Consoles ▾" — IntelliJ's "Jump to Query Console": this connection's consoles, by name. */
+    private final class JumpToConsolesAction extends ComboBoxAction {
+        JumpToConsolesAction() {
+            setSmallVariant(true);
+            getTemplatePresentation().setDescription("Jump to one of this connection's consoles");
+        }
+
+        @Override
+        protected @NotNull DefaultActionGroup createPopupActionGroup(@NotNull JComponent button,
+                                                                     @NotNull DataContext context) {
+            DefaultActionGroup group = new DefaultActionGroup();
+            List<ConsoleStore.ConsoleState> consoles =
+                    ConsoleStore.getInstance(project).ofConnection(config().id);
+            for (ConsoleStore.ConsoleState console : consoles) {
+                String preview = console.sql == null ? "" : console.sql.strip().replaceAll("\\s+", " ");
+                String suffix = console.id.equals(id) ? " (this console)" : "";
+                group.add(new DumbAwareAction(console.name + suffix,
+                        preview.isEmpty() ? "Empty console" : preview.substring(0, Math.min(120, preview.length())),
+                        AllIcons.Nodes.Console) {
                     @Override
                     public void actionPerformed(@NotNull AnActionEvent e) {
-                        runMode = mode;
+                        if (!console.id.equals(id)) {
+                            explorer.openConsoleState(config(), console);
+                        }
+                    }
+                });
+            }
+            group.addSeparator();
+            group.add(new DumbAwareAction("New SQL Console…", "Open another console for this connection",
+                    AllIcons.General.Add) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e) {
+                    explorer.newConsole(config(), database, schema);
+                }
+            });
+            return group;
+        }
+
+        @Override
+        public void update(@NotNull AnActionEvent e) {
+            e.getPresentation().setText("Consoles");
+        }
+
+        @Override
+        public @NotNull ActionUpdateThread getActionUpdateThread() {
+            return ActionUpdateThread.EDT;
+        }
+    }
+
+    /** Renames this console — its tab title follows. */
+    private final class RenameConsoleAction extends DumbAwareAction {
+        RenameConsoleAction() {
+            super("Rename Console…", "Rename this console", AllIcons.Actions.Edit);
+        }
+
+        @Override
+        public void actionPerformed(@NotNull AnActionEvent e) {
+            String entered = com.intellij.openapi.ui.Messages.showInputDialog(project,
+                    "Console name:", "Rename Console", null, name, null);
+            if (entered != null) {
+                rename(entered);
+            }
+        }
+
+        @Override
+        public @NotNull ActionUpdateThread getActionUpdateThread() {
+            return ActionUpdateThread.EDT;
+        }
+    }
+
+    /** "connection ▾" — run this console against another connection of the same language. */
+    private final class ConnectionAction extends ComboBoxAction {
+        ConnectionAction() {
+            setSmallVariant(true);
+            getTemplatePresentation().setDescription("The connection this console runs on");
+        }
+
+        @Override
+        protected @NotNull DefaultActionGroup createPopupActionGroup(@NotNull JComponent button,
+                                                                     @NotNull DataContext context) {
+            DefaultActionGroup group = new DefaultActionGroup();
+            var consoleLanguage = config().dialect().consoleLanguage();
+            for (DbConfig each : dev.phucngu.intelladb.connection.ConnectionManager.getInstance(project).configs()) {
+                if (each.dialect().consoleLanguage() != consoleLanguage) {
+                    continue; // a Mongo console cannot run SQL and vice versa
+                }
+                boolean current = each.id.equals(config().id);
+                group.add(new DumbAwareAction(each.name + (current ? "  ✓" : ""), each.describe(),
+                        IntellaDbIcons.connection(each.dialectId, current)) {
+                    @Override
+                    public void actionPerformed(@NotNull AnActionEvent e) {
+                        rebind(each);
                     }
                 });
             }
@@ -663,8 +848,9 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
 
         @Override
         public void update(@NotNull AnActionEvent e) {
-            e.getPresentation().setText(runMode.label);
-            e.getPresentation().setDescription(runMode.description);
+            e.getPresentation().setText(config().name);
+            e.getPresentation().setIcon(IntellaDbIcons.connection(config().dialectId,
+                    explorer.sessionOf(config()) != null));
         }
 
         @Override

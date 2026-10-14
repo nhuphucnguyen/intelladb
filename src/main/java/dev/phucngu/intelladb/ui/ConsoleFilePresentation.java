@@ -39,7 +39,7 @@ public final class ConsoleFilePresentation implements EditorTabTitleProvider, Fi
             for (var editor : source.getEditors(file)) {
                 console.installHeader(editor);
             }
-            ConsoleStore.getInstance(source.getProject()).setOpen(console.config().id, true);
+            ConsoleStore.getInstance(source.getProject()).setOpen(console.consoleId(), true);
         }
     }
 
@@ -47,7 +47,7 @@ public final class ConsoleFilePresentation implements EditorTabTitleProvider, Fi
     public void fileClosed(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
         SqlConsole console = file.getUserData(SqlConsole.KEY);
         if (console != null) {
-            ConsoleStore.getInstance(source.getProject()).setOpen(console.config().id, false);
+            ConsoleStore.getInstance(source.getProject()).setOpen(console.consoleId(), false);
         }
     }
 }

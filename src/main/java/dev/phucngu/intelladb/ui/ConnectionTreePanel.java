@@ -695,6 +695,15 @@ public final class ConnectionTreePanel implements Disposable {
         openConsole(config, null, null);
     }
 
+    /** Opens a brand-new console for the connection (connecting first if needed), scoped like its call site. */
+    public void newConsoleFor(@NotNull DbConfig config, @Nullable String database, @Nullable String schema) {
+        if (manager.session(config.id) != null) {
+            explorer.newConsole(config, database, schema);
+        } else {
+            explorer.withSession(config, session -> explorer.newConsole(config, database, schema));
+        }
+    }
+
     /**
      * Opens the connection's console; a non-null {@code schema} becomes its default schema,
      * in {@code database} when the connection browses every database.
@@ -746,8 +755,8 @@ public final class ConnectionTreePanel implements Disposable {
             group.add(action("Refresh Schema", "Reload metadata",
                     com.intellij.icons.AllIcons.Actions.Refresh, this::refreshSelected));
             group.addSeparator();
-            group.add(action("New SQL Console", "Open a SQL console",
-                    com.intellij.icons.AllIcons.Nodes.Console, () -> openConsoleFor(config)));
+            group.add(action("New SQL Console", "Open a fresh console for this connection",
+                    com.intellij.icons.AllIcons.Nodes.Console, () -> newConsoleFor(config, null, null)));
             group.addSeparator();
             group.add(action("Edit Connection…", "Edit connection settings",
                     com.intellij.icons.AllIcons.Actions.Edit, () -> editConnection(config)));
@@ -761,8 +770,8 @@ public final class ConnectionTreePanel implements Disposable {
         } else if (entry instanceof DatabaseEntry databaseEntry) {
             group.add(action("Refresh Schema", "Reload metadata",
                     com.intellij.icons.AllIcons.Actions.Refresh, this::refreshSelected));
-            group.add(action("New SQL Console", "Open a SQL console",
-                    com.intellij.icons.AllIcons.Nodes.Console, () -> openConsole(databaseEntry.config(),
+            group.add(action("New SQL Console", "Open a fresh console on this database",
+                    com.intellij.icons.AllIcons.Nodes.Console, () -> newConsoleFor(databaseEntry.config(),
                             databaseEntry.config().allDatabases() ? databaseEntry.name() : null, null)));
         } else if (entry instanceof FolderEntry) {
             group.add(action("Refresh Schema", "Reload metadata",
@@ -771,9 +780,9 @@ public final class ConnectionTreePanel implements Disposable {
             DbConfig config = schemaEntry.config();
             group.add(action("Refresh Schema", "Reload metadata",
                     com.intellij.icons.AllIcons.Actions.Refresh, this::refreshSelected));
-            group.add(action("New SQL Console", "Open a SQL console",
+            group.add(action("New SQL Console", "Open a fresh console scoped to this schema",
                     com.intellij.icons.AllIcons.Nodes.Console,
-                    () -> openConsole(config, schemaEntry.database(), schemaEntry.name())));
+                    () -> newConsoleFor(config, schemaEntry.database(), schemaEntry.name())));
             group.addSeparator();
             DefaultActionGroup scripts = new DefaultActionGroup("SQL Scripts", true);
             scripts.add(action("Copy Schema DDL", "Copy CREATE TABLE statements",
@@ -796,9 +805,9 @@ public final class ConnectionTreePanel implements Disposable {
                     com.intellij.icons.AllIcons.Actions.Preview, () -> viewTableData(ref)));
             navigate.add(action("Go to DDL", "Open the CREATE statement in an editor tab",
                     com.intellij.icons.AllIcons.Actions.EditSource, () -> explorer.openDdl(ref)));
-            navigate.add(action("SQL Console", "Open a console scoped to this table's schema",
+            navigate.add(action("SQL Console", "Open a fresh console scoped to this table's schema",
                     com.intellij.icons.AllIcons.Nodes.Console,
-                    () -> openConsole(tableEntry.config(), tableEntry.database(), tableEntry.schema())));
+                    () -> newConsoleFor(tableEntry.config(), tableEntry.database(), tableEntry.schema())));
             group.add(navigate);
             group.addSeparator();
             DefaultActionGroup scripts = new DefaultActionGroup("SQL Scripts", true);
