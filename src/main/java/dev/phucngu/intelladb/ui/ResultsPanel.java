@@ -5,6 +5,7 @@ import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.ActionToolbar;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
@@ -57,9 +58,22 @@ public final class ResultsPanel extends JPanel {
 
         void cancel();
 
+        /**
+         * Runs {@code sql} into the panel — pagination pages and filtered variants of the
+         * current result. Falls back to rerunning the current result.
+         */
+        default void runQuery(@NotNull ResultsPanel panel, @NotNull String sql) {
+            rerun(panel);
+        }
+
         /** False for a cached result (query history): Rerun / Cancel are hidden. */
         default boolean canRerun() {
             return true;
+        }
+
+        /** True when the rows come from one table's preview: its row count is fetched eagerly. */
+        default boolean isTablePreview() {
+            return false;
         }
 
         /** Connection the rows come from — names the export source and finds its DDL. */
@@ -91,6 +105,23 @@ public final class ResultsPanel extends JPanel {
     /** Key columns of {@link #editTable} → their index in the result. */
     private java.util.Map<String, Integer> keyColumns = java.util.Map.of();
     private boolean submitting;
+
+    /** Page sizes the paging combo offers; 0 (not among them) means "All Rows". */
+    private static final int[] PAGE_SIZES = {10, 50, 100, 500};
+    private static final int ALL_ROWS = 0;
+    private static final String PAGE_SIZE_KEY = "IntellaDb.Results.pageSize";
+    private int pageSize = loadPageSize();
+    /** The query being paged through (the result's own SQL); null until a result arrives. */
+    private @Nullable String pageBase;
+    /** First row of the current page within {@link #pageBase}. */
+    private int pageOffset;
+    /** Total rows of {@link #pageBase}; null until counted (table previews count eagerly). */
+    private @Nullable Long totalRows;
+    /** True when the shown rows are a page we fetched, not the result as it arrived. */
+    private boolean showingPage;
+    /** Set while a fetched page is on its way, so {@link #showResult} keeps the page state. */
+    private boolean pageInFlight;
+    private @Nullable ActionToolbar leftToolbar;
 
     /** Compact grid (no toolbar). */
     public ResultsPanel(@NotNull Project project) {
@@ -152,12 +183,24 @@ public final class ResultsPanel extends JPanel {
         info.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
         switch (result.kind) {
             case ROWS -> {
+                if (pageInFlight) {
+                    pageInFlight = false;
+                    showingPage = true;
+                } else {
+                    // A result as it arrived (console run, preview): paging starts over from it.
+                    pageBase = result.sql;
+                    pageOffset = 0;
+                    totalRows = null;
+                    showingPage = false;
+                }
                 grid.setResult(result);
                 grid.setKeyColumns(primaryKeyColumns(result));
                 grid.getEmptyText().setText("No rows");
                 resultInfo = rowsInfo(result);
                 info.setText(resultInfo);
                 setUpEditing(result);
+                refreshToolbar();
+                maybeCountRows();
             }
             case UPDATE_COUNT -> {
                 grid.setResult(null);
@@ -178,10 +221,216 @@ public final class ResultsPanel extends JPanel {
         }
     }
 
-    private static @NotNull String rowsInfo(@NotNull SqlResult result) {
+    /** What the info line says about the shown rows — a page range when paging. */
+    private @NotNull String rowsInfo(@NotNull SqlResult result) {
         int count = result.rows.size();
+        if (showingPage && pageSize > 0) {
+            if (count == 0) {
+                return "no rows beyond " + pageOffset + "  ·  " + result.durationMs + " ms";
+            }
+            long last = totalRows == null ? pageOffset + count : Math.min(totalRows, pageOffset + (long) count);
+            return "rows " + (pageOffset + 1) + "–" + last
+                    + (totalRows != null ? " of " + totalRows : "")
+                    + "  ·  " + result.durationMs + " ms";
+        }
         String note = result.truncated ? " (first " + SqlResult.MAX_ROWS + ")" : "";
         return count + " row" + (count == 1 ? "" : "s") + note + "  ·  " + result.durationMs + " ms";
+    }
+
+    // ------------------------------------------------------------------ pagination
+
+    private static int loadPageSize() {
+        int size = PropertiesComponent.getInstance().getInt(PAGE_SIZE_KEY, 500);
+        return size > 0 ? size : ALL_ROWS;
+    }
+
+    private boolean pagingUsable() {
+        return host != null && host.canRerun() && hasRows() && pageSize > 0 && !dialect().schemaless();
+    }
+
+    private void refreshToolbar() {
+        if (leftToolbar != null) {
+            leftToolbar.updateActionsImmediately();
+        }
+    }
+
+    /** Fetches the page of {@link #pageBase} starting at {@code offset}. */
+    private void runPage(int offset) {
+        if (host == null || !host.canRerun() || pageBase == null || pageSize <= 0 || running
+                || !grid.finishCellEditing() || grid.hasEdits()) {
+            return; // pending edits tie the shown rows to their table — Submit or Revert first
+        }
+        pageOffset = Math.max(0, offset);
+        pageInFlight = true;
+        host.runQuery(this, dialect().limitedQuery(pageBase, pageOffset, pageSize));
+    }
+
+    /** One past the last row shown within {@link #pageBase}. */
+    private int lastShownRow() {
+        return (showingPage ? pageOffset : 0) + (result == null ? 0 : result.rows.size());
+    }
+
+    /** Whether more rows wait after the shown ones — sure when counted, likely otherwise. */
+    private boolean moreRowsLikely() {
+        if (totalRows != null) {
+            return lastShownRow() < totalRows;
+        }
+        return result != null && (result.truncated || showingPage || result.rows.size() >= pageSize);
+    }
+
+    /** Table previews count their rows in the background so the paging cluster can offer Last. */
+    private void maybeCountRows() {
+        if (totalRows != null || host == null || !host.canRerun() || !host.isTablePreview()
+                || pageBase == null || dialect().schemaless()) {
+            return;
+        }
+        DbConfig config = host.config();
+        DbSession session = config == null ? null : ConnectionManager.getInstance(project).session(config.id);
+        if (session == null) {
+            return;
+        }
+        String base = pageBase;
+        String database = result == null ? null : result.database;
+        String count = dialect().countQuery(base);
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            SqlResult outcome = session.execute(database, count);
+            ApplicationManager.getApplication().invokeLater(() -> {
+                if (!base.equals(pageBase) || result == null || totalRows != null) {
+                    return; // paged on or replaced meanwhile
+                }
+                if (outcome.kind == SqlResult.Kind.ROWS && !outcome.rows.isEmpty()
+                        && outcome.rows.getFirst()[0] instanceof Number number) {
+                    totalRows = number.longValue();
+                    resultInfo = rowsInfo(result);
+                    editsChanged();
+                    refreshToolbar();
+                }
+            });
+        });
+    }
+
+    /** Toolbar actions of the pagination cluster; hidden for unpaged/compact results and MongoDB. */
+    private abstract class PagingAction extends DumbAwareAction {
+        PagingAction(@NotNull String text, @NotNull String description, @Nullable javax.swing.Icon icon) {
+            super(text, description, icon);
+        }
+
+        abstract boolean enabled();
+
+        @Override
+        public void update(@NotNull AnActionEvent e) {
+            e.getPresentation().setVisible(pagingUsable());
+            e.getPresentation().setEnabled(!running && !submitting && !grid.hasEdits() && enabled());
+        }
+
+        @Override
+        public @NotNull ActionUpdateThread getActionUpdateThread() {
+            return ActionUpdateThread.EDT;
+        }
+    }
+
+    private final PagingAction firstPageAction =
+            new PagingAction("First Page", "Show the first page", AllIcons.Actions.Play_first) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e) {
+                    runPage(0);
+                }
+
+                @Override
+                boolean enabled() {
+                    return showingPage && pageOffset > 0;
+                }
+            };
+
+    private final PagingAction prevPageAction =
+            new PagingAction("Previous Page", "Show the previous page (Ctrl+Alt+Up)", AllIcons.Actions.Play_back) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e) {
+                    runPage(Math.max(0, pageOffset - pageSize));
+                }
+
+                @Override
+                boolean enabled() {
+                    return showingPage && pageOffset > 0;
+                }
+            };
+
+    private final PagingAction nextPageAction =
+            new PagingAction("Next Page", "Show the next page (Ctrl+Alt+Down)", AllIcons.Actions.Play_forward) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e) {
+                    runPage(showingPage ? pageOffset + pageSize : lastShownRow());
+                }
+
+                @Override
+                boolean enabled() {
+                    return moreRowsLikely();
+                }
+            };
+
+    private final PagingAction lastPageAction =
+            new PagingAction("Last Page", "Show the last page", AllIcons.Actions.Play_last) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e) {
+                    if (totalRows == null) {
+                        return;
+                    }
+                    runPage((int) Math.max(0, (totalRows - 1) / pageSize * pageSize));
+                }
+
+                @Override
+                boolean enabled() {
+                    return totalRows != null && lastShownRow() < totalRows;
+                }
+            };
+
+    /** "500 Rows ▾" — the page size, remembered across sessions. */
+    private final PageSizeAction pageSizeAction = new PageSizeAction();
+
+    private final class PageSizeAction extends ComboBoxAction {
+        PageSizeAction() {
+            setSmallVariant(true);
+            getTemplatePresentation().setDescription("Number of rows fetched per page");
+        }
+
+        @Override
+        protected @NotNull DefaultActionGroup createPopupActionGroup(@NotNull JComponent button,
+                                                                     @NotNull DataContext context) {
+            DefaultActionGroup group = new DefaultActionGroup();
+            for (int size : PAGE_SIZES) {
+                group.add(sizeAction(size + " Rows", size));
+            }
+            group.add(sizeAction("All Rows", ALL_ROWS));
+            return group;
+        }
+
+        private @NotNull AnAction sizeAction(@NotNull String text, int size) {
+            return new DumbAwareAction(text) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e) {
+                    pageSize = size;
+                    PropertiesComponent.getInstance().setValue(PAGE_SIZE_KEY, size, 500);
+                    if (size > 0 && hasRows()) {
+                        // The new size's first page containing the row we're on.
+                        runPage(showingPage ? pageOffset / size * size : 0);
+                    } else {
+                        refreshToolbar();
+                    }
+                }
+            };
+        }
+
+        @Override
+        public void update(@NotNull AnActionEvent e) {
+            e.getPresentation().setText(pageSize > 0 ? pageSize + " Rows" : "All Rows");
+            e.getPresentation().setVisible(host != null && host.canRerun() && hasRows()
+                    && !dialect().schemaless());
+        }
+
+        @Override
+        public @NotNull ActionUpdateThread getActionUpdateThread() {
+            return ActionUpdateThread.EDT;
+        }
     }
 
     // ------------------------------------------------------------------ toolbar
@@ -248,6 +497,13 @@ public final class ResultsPanel extends JPanel {
         }
 
         left.addSeparator();
+        left.add(firstPageAction);
+        left.add(prevPageAction);
+        left.add(pageSizeAction);
+        left.add(nextPageAction);
+        left.add(lastPageAction);
+
+        left.addSeparator();
         left.add(addRowAction);
         left.add(deleteRowsAction);
         left.add(revertAction);
@@ -296,6 +552,7 @@ public final class ResultsPanel extends JPanel {
 
         ActionToolbar leftBar = ActionManager.getInstance().createActionToolbar("IntellaDbResults", left, true);
         leftBar.setTargetComponent(this);
+        leftToolbar = leftBar;
         ActionToolbar rightBar = ActionManager.getInstance().createActionToolbar("IntellaDbResultsExport", right, true);
         rightBar.setTargetComponent(this);
 
@@ -622,6 +879,12 @@ public final class ResultsPanel extends JPanel {
                 com.intellij.openapi.util.SystemInfo.isMac
                         ? shortcut(java.awt.event.KeyEvent.VK_BACK_SPACE, java.awt.event.InputEvent.META_DOWN_MASK)
                         : shortcut(java.awt.event.KeyEvent.VK_Y, java.awt.event.InputEvent.CTRL_DOWN_MASK)), grid);
+        prevPageAction.registerCustomShortcutSet(new com.intellij.openapi.actionSystem.CustomShortcutSet(
+                shortcut(java.awt.event.KeyEvent.VK_UP,
+                        java.awt.event.InputEvent.CTRL_DOWN_MASK | java.awt.event.InputEvent.ALT_DOWN_MASK)), grid);
+        nextPageAction.registerCustomShortcutSet(new com.intellij.openapi.actionSystem.CustomShortcutSet(
+                shortcut(java.awt.event.KeyEvent.VK_DOWN,
+                        java.awt.event.InputEvent.CTRL_DOWN_MASK | java.awt.event.InputEvent.ALT_DOWN_MASK)), grid);
         DefaultActionGroup popup = new DefaultActionGroup();
         popup.add(addRowAction);
         popup.add(setNullAction);

@@ -78,6 +78,8 @@ Legend: ✅ done · 🟡 partial · ❌ missing
 |---|---|---|
 | Table data preview | ✅ | first 200 rows |
 | Results grid, multi-result tabs | ✅ | `ResultsPanel`/`ResultsHub` |
+| Toolbar grammar `[Rerun][Cancel] | [pages][size ▾] | [+ row][del][revert][submit]` | ✅ | `ResultsPanel` |
+| **Pagination** (first/prev/size ▾/next/last, Ctrl+Alt+Up/Down) | 🟡 | SQL dialects page via `LIMIT/OFFSET`, row counts fetched for table previews; MongoDB not paged yet |
 | Inline cell edit → UPDATE (all-or-nothing) | ✅ | `RowUpdates`, PK/unique-key guarded |
 | Set NULL / delete rows | ✅ | |
 | **Add row → INSERT** | ✅ | composes into the same all-or-nothing Submit unit; insert-only grids without a key |
@@ -85,7 +87,6 @@ Legend: ✅ done · 🟡 partial · ❌ missing
 | CSV/TSV **import** | ❌ | |
 | LOB / image cell viewers | ❌ | |
 | Result diff (rerun vs cached) | ❌ | |
-| Pagination / streaming large results | 🟡 | rows capped at 1000 |
 | Aggregate footer | ❌ | |
 
 ## SQL language

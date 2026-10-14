@@ -199,6 +199,20 @@ public interface DbDialect {
         return selectSql + " LIMIT " + rows;
     }
 
+    /** The query limited to one page of results; {@code limit} <= 0 means no limit. */
+    default @NotNull String limitedQuery(@NotNull String selectSql, int offset, int limit) {
+        if (limit <= 0) {
+            return selectSql;
+        }
+        return offset > 0 ? selectSql + " LIMIT " + limit + " OFFSET " + offset
+                : limit(selectSql, limit);
+    }
+
+    /** A query counting the rows {@code selectSql} returns (the grid's row counter). */
+    default @NotNull String countQuery(@NotNull String selectSql) {
+        return "SELECT COUNT(*) FROM (\n" + selectSql + "\n) AS intelladb_count";
+    }
+
     /** Statement that makes {@code namespace} the default schema of the session, or null if unsupported. */
     default @Nullable String useNamespaceStatement(@NotNull String namespace) {
         return null;

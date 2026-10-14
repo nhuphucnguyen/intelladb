@@ -318,8 +318,21 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         if (previous == null || running) {
             return;
         }
+        runInto(panel, previous.sql);
+    }
+
+    /** Runs {@code sql} into the panel — Rerun and the grid's pagination pages. */
+    private void runInto(@NotNull ResultsPanel panel, @NotNull String sql) {
+        if (running) {
+            return;
+        }
         explorer.withSession(config(), session ->
-                start(session, List.of(new SqlSplitter.Statement(-1, -1, previous.sql)), panel));
+                start(session, List.of(new SqlSplitter.Statement(-1, -1, sql)), panel));
+    }
+
+    @Override
+    public void runQuery(@NotNull ResultsPanel panel, @NotNull String sql) {
+        runInto(panel, sql);
     }
 
     @Override

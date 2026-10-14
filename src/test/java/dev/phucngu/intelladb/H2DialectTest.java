@@ -111,6 +111,21 @@ class H2DialectTest {
         assertEquals("2", scalar("SELECT count(*) FROM owner"), "nothing was written");
     }
 
+    @Test
+    void limitedQueriesPageAndCount() {
+        SqlResult page = session.execute(DIALECT.limitedQuery("SELECT id FROM owner ORDER BY id", 1, 1));
+        assertTrue(page.isSuccessful(), page.text);
+        assertEquals(1, page.rows.size(), "one row of the two");
+        assertEquals("2", String.valueOf(page.rows.get(0)[0]));
+
+        SqlResult all = session.execute(DIALECT.limitedQuery("SELECT id FROM owner ORDER BY id", 0, 10));
+        assertEquals(2, all.rows.size());
+
+        SqlResult count = session.execute(DIALECT.countQuery("SELECT id FROM owner"));
+        assertTrue(count.isSuccessful(), count.text);
+        assertEquals("2", String.valueOf(count.rows.get(0)[0]));
+    }
+
     private static String schema() {
         return schemaOf(session.catalog(), "owner").name();
     }

@@ -27,12 +27,16 @@ public record TableRef(@NotNull DbConfig config, @Nullable String database, @Not
 
     /** Loads a row preview into the given results panel (async). */
     public void showIn(@NotNull DbExplorerPanel explorer, @NotNull ResultsPanel panel) {
+        showSql(explorer, panel, config.dialect().previewStatement(schema, meta.name, 200));
+    }
+
+    /** Runs {@code sql} — pagination pages, filtered variants — into the panel (async). */
+    public void showSql(@NotNull DbExplorerPanel explorer, @NotNull ResultsPanel panel, @NotNull String sql) {
         DbSession session = explorer.sessionOf(config);
         if (session == null) {
             panel.showMessage("Not connected. Connect '" + config.name + "' first.");
             return;
         }
-        String sql = config.dialect().previewStatement(schema, meta.name, 200);
         panel.showRunning();
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             dev.phucngu.intelladb.connection.SqlResult result = session.execute(database, sql);

@@ -261,6 +261,16 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
             }
 
             @Override
+            public void runQuery(@NotNull ResultsPanel target, @NotNull String sql) {
+                table.showSql(DbExplorerPanel.this, target, sql);
+            }
+
+            @Override
+            public boolean isTablePreview() {
+                return true;
+            }
+
+            @Override
             public @NotNull DbConfig config() {
                 return table.config();
             }

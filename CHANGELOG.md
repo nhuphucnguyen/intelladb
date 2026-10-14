@@ -15,6 +15,10 @@
   tree's Navigate ▾ menu, with Copy Qualified Name in SQL Scripts ▾).
 - **A table's data tab now carries its DDL beside it** — `[Data | DDL]` in the same editor
   tab, the DDL refreshed from the catalog whenever you switch to it.
+- **Results pages through big tables like IntelliJ's grid**: a
+  `[first][prev][size ▾][next][last]` cluster (10/50/100/500/all rows, Ctrl+Alt+Up/Down),
+  a remembered page size, and — for table previews — a background row count, so the
+  status line reads "rows 51–100 of 1234 · 6 ms".
 - **SQLite and H2 connections.** Both drivers are bundled, so an embedded database needs no
   server: point the Database field at a file path (`app.sqlite3`, `~/db/app`), leave it
   empty for an in-memory database, or use URL-only mode for a full JDBC URL. A SQLite file
