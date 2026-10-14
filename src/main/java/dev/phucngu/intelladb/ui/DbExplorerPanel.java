@@ -239,6 +239,9 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
                 .openFile(console.file(), focus);
         for (var editor : editors) {
             console.installHeader(editor); // idempotent; the file listener covers later reopens
+            if (editor instanceof com.intellij.openapi.fileEditor.TextEditor textEditor) {
+                SqlConsole.caretAtFreshLine(project, textEditor.getEditor());
+            }
         }
         return console;
     }

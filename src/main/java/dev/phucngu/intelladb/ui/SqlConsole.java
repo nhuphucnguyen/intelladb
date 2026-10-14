@@ -166,6 +166,22 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         return file;
     }
 
+    /**
+     * Places the caret where typing continues: the end of the console, on a fresh line — not
+     * offset 0, before the header comment a new console opens with. A text without a trailing
+     * newline gets one, so the last statement isn't continued by accident.
+     */
+    public static void caretAtFreshLine(@NotNull Project project, @NotNull Editor editor) {
+        Document document = editor.getDocument();
+        String text = document.getText();
+        if (!text.isEmpty() && !text.endsWith("\n")) {
+            WriteCommandAction.runWriteCommandAction(project, () ->
+                    document.insertString(document.getTextLength(), "\n"));
+        }
+        editor.getCaretModel().moveToOffset(document.getTextLength());
+        editor.getScrollingModel().scrollToCaret(com.intellij.openapi.editor.ScrollType.MAKE_VISIBLE);
+    }
+
     /** Tab / tree title, e.g. {@code console [@localhost]} or {@code queries [@localhost]}. */
     @NotNull String title() {
         return name + " [@" + config().name + "]";

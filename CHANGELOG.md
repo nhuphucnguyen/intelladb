@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-### Added
+#### Fixed
+- Opening a console puts the caret at the end, on a fresh line — not before the
+  header comment a new console starts with.
+
+## Added
 - **Joins complete without foreign keys**: when no declared key links two tables, naming does —
   identical column names, and `id` against `<singular table>_id` (a `purchases` table joins on
   `purchase_id`). Name coincidences rank below declared keys, and integer keys above string ones.
