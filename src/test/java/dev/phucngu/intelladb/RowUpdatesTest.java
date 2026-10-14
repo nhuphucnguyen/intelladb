@@ -79,6 +79,21 @@ class RowUpdatesTest {
     }
 
     @Test
+    void insertListsOnlyTheGivenColumns() {
+        assertEquals("INSERT INTO public.actor (first_name, \"Last Name\") VALUES ('O''Neil', NULL)",
+                RowUpdates.insert(new PostgresDialect(), "public.actor",
+                        map("first_name", "O'Neil", "Last Name", null)));
+        assertEquals("INSERT INTO shop.`order` (path, id) VALUES ('C:\\\\tmp', 7)",
+                RowUpdates.insert(new MySqlDialect(), "shop.`order`", map("path", "C:\\tmp", "id", 7L)));
+    }
+
+    @Test
+    void insertNeedsAColumn() {
+        assertThrows(IllegalArgumentException.class,
+                () -> RowUpdates.insert(new PostgresDialect(), "t", Map.of()));
+    }
+
+    @Test
     void deleteMatchesTheLoadedKey() {
         assertEquals("DELETE FROM public.film_actor WHERE actor_id = 1 AND film_id = 23",
                 RowUpdates.delete(new PostgresDialect(), "public.film_actor", map("actor_id", 1, "film_id", 23)));

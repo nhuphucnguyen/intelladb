@@ -132,8 +132,9 @@ public final class PostgresDialect implements DbDialect {
     }
 
     @Override
-    public @Nullable ObjectsLoader objectsLoader() {
-        return objects;
+    public @NotNull dev.phucngu.intelladb.connection.capability.Capabilities capabilities() {
+        return dev.phucngu.intelladb.connection.capability.Capabilities.GENERIC
+                .extend().bind(ObjectsLoader.class, objects);
     }
 
     @Override

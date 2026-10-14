@@ -65,6 +65,23 @@ public final class RowUpdates {
         return false;
     }
 
+    /** {@code INSERT INTO table (a, b) VALUES (1, 'x')} for one new row. */
+    public static @NotNull String insert(@NotNull DbDialect dialect, @NotNull String qualifiedTable,
+                                         @NotNull Map<String, Object> values) {
+        if (values.isEmpty()) {
+            throw new IllegalArgumentException("An insert needs at least one column");
+        }
+        StringBuilder columns = new StringBuilder();
+        StringBuilder literals = new StringBuilder();
+        String separator = "";
+        for (Map.Entry<String, Object> value : values.entrySet()) {
+            columns.append(separator).append(dialect.quote(value.getKey()));
+            literals.append(separator).append(literal(dialect, value.getValue()));
+            separator = ", ";
+        }
+        return "INSERT INTO " + qualifiedTable + " (" + columns + ") VALUES (" + literals + ")";
+    }
+
     /** {@code UPDATE table SET a = 'x' WHERE id = 1} for one edited row. */
     public static @NotNull String update(@NotNull DbDialect dialect, @NotNull String qualifiedTable, @NotNull Edit edit) {
         if (edit.changes().isEmpty() || edit.key().isEmpty()) {

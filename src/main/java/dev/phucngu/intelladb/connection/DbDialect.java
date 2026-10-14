@@ -168,9 +168,23 @@ public interface DbDialect {
         return NamespaceModel.DATABASES_AND_SCHEMAS;
     }
 
+    /**
+     * Namespaces of the connected database when the driver's metadata reports none usefully
+     * (SQLite's driver lists neither schemas nor catalogs); null = use the JDBC metadata.
+     */
+    default @Nullable java.util.List<String> namespaceNames(@NotNull java.sql.Connection connection)
+            throws java.sql.SQLException {
+        return null;
+    }
+
+    /** This dialect's optional behaviours, keyed by capability; see {@code Capabilities}. */
+    default @NotNull dev.phucngu.intelladb.connection.capability.Capabilities capabilities() {
+        return dev.phucngu.intelladb.connection.capability.Capabilities.GENERIC;
+    }
+
     /** Loader for the objects plain JDBC metadata misses; null means plain JDBC only. */
     default @Nullable ObjectsLoader objectsLoader() {
-        return null;
+        return capabilities().find(ObjectsLoader.class);
     }
 
     // ------------------------------------------------------------------ SQL syntax
@@ -255,16 +269,31 @@ public interface DbDialect {
         return false;
     }
 
+    /**
+     * The statement that inserts one new row; columns the user left empty are absent, so the
+     * table's defaults apply.
+     */
+    default @NotNull String insertStatement(@Nullable String schema, @NotNull String table,
+                                            @NotNull java.util.Map<String, Object> values) {
+        return capabilities().get(dev.phucngu.intelladb.connection.capability.RowMutator.class,
+                dev.phucngu.intelladb.connection.capability.GenericRowMutator.INSTANCE)
+                .insert(this, schema, table, values);
+    }
+
     /** The statement that writes one edited row back (an UPDATE for SQL). */
     default @NotNull String updateStatement(@Nullable String schema, @NotNull String table,
                                             @NotNull dev.phucngu.intelladb.sql.RowUpdates.Edit edit) {
-        return dev.phucngu.intelladb.sql.RowUpdates.update(this, qualified(schema, table), edit);
+        return capabilities().get(dev.phucngu.intelladb.connection.capability.RowMutator.class,
+                dev.phucngu.intelladb.connection.capability.GenericRowMutator.INSTANCE)
+                .update(this, schema, table, edit);
     }
 
     /** The statement that deletes one row, found by its loaded key (a DELETE for SQL). */
     default @NotNull String deleteStatement(@Nullable String schema, @NotNull String table,
                                             @NotNull java.util.Map<String, Object> key) {
-        return dev.phucngu.intelladb.sql.RowUpdates.delete(this, qualified(schema, table), key);
+        return capabilities().get(dev.phucngu.intelladb.connection.capability.RowMutator.class,
+                dev.phucngu.intelladb.connection.capability.GenericRowMutator.INSTANCE)
+                .delete(this, schema, table, key);
     }
 
     /** {@code schema.table}, quoted as needed; just the table without a schema. */

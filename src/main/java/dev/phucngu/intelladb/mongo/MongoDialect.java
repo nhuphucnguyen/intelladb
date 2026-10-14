@@ -193,34 +193,12 @@ public final class MongoDialect implements DbDialect {
         return true;
     }
 
-    /**
-     * {@code db.getSiblingDB("shop").getCollection("pets").updateOne({"_id": …}, {"$set": {…}})}:
-     * edited text is typed like the value it replaces ({@link MongoValues#edited}); Set NULL sets null.
-     */
+    /** Row writes speak mongosh ({@link MongoRowMutator}); everything else stays the generic facade. */
     @Override
-    public @NotNull String updateStatement(@Nullable String schema, @NotNull String table, @NotNull RowUpdates.Edit edit) {
-        if (edit.changes().isEmpty() || edit.key().isEmpty()) {
-            throw new IllegalArgumentException("An update needs changed fields and a key");
-        }
-        Map<String, Object> set = new LinkedHashMap<>();
-        edit.changes().forEach((field, text) ->
-                set.put(field, MongoValues.edited(text, MongoValues.value(edit.loaded().get(field)))));
-        return collection(schema, table) + ".updateOne(" + filter(edit.key()) + ", "
-                + MongoValues.shell(Map.of("$set", set)) + ")";
-    }
-
-    @Override
-    public @NotNull String deleteStatement(@Nullable String schema, @NotNull String table, @NotNull Map<String, Object> key) {
-        if (key.isEmpty()) {
-            throw new IllegalArgumentException("A delete needs a key");
-        }
-        return collection(schema, table) + ".deleteOne(" + filter(key) + ")";
-    }
-
-    private static @NotNull String filter(@NotNull Map<String, Object> key) {
-        Map<String, Object> filter = new LinkedHashMap<>();
-        key.forEach((field, loaded) -> filter.put(field, MongoValues.value(loaded)));
-        return MongoValues.shell(filter);
+    public @NotNull dev.phucngu.intelladb.connection.capability.Capabilities capabilities() {
+        return dev.phucngu.intelladb.connection.capability.Capabilities.GENERIC
+                .extend()
+                .bind(dev.phucngu.intelladb.connection.capability.RowMutator.class, MongoRowMutator.INSTANCE);
     }
 
     @Override
