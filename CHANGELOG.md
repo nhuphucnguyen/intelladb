@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-10-15
 
 #### Fixed
 - Opening a console puts the caret at the end, on a fresh line — not before the
