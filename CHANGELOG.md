@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 — 2026-10-16
+
+#### Added
+- **Select all / Select none in the Schemas tab**: two links next to *All schemas* tick or clear
+  the whole list in one click, so you can start from everything and drop a few, or start from
+  nothing and pick a few (#1).
+
 ## 0.4.0 — 2026-10-15
 
 #### Fixed
