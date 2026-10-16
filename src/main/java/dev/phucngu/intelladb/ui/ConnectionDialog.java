@@ -171,6 +171,10 @@ public final class ConnectionDialog extends DialogWrapper {
     // Schemas
     private final JBCheckBox allSchemas = new JBCheckBox("All schemas", true);
     private final SchemaCheckTree schemaList = new SchemaCheckTree();
+    private final ActionLink selectAllSchemas =
+            new ActionLink("Select all", (java.awt.event.ActionListener) e -> schemaList.setAllChecked(true));
+    private final ActionLink selectNoSchemas =
+            new ActionLink("Select none", (java.awt.event.ActionListener) e -> schemaList.setAllChecked(false));
     private final JBCheckBox showSystemSchemas = new JBCheckBox("Show internal system schemas");
     private final JBLabel schemaStatus = new JBLabel(" ");
     private boolean schemasLoaded;
@@ -577,8 +581,12 @@ public final class ConnectionDialog extends DialogWrapper {
     private @NotNull JComponent schemasTab() {
         JButton refresh = new JButton("Refresh", AllIcons.Actions.Refresh);
         refresh.addActionListener(e -> loadSchemas());
+        JPanel picks = new JPanel(new HorizontalLayout(JBUI.scale(12)));
+        picks.add(allSchemas);
+        picks.add(selectAllSchemas);
+        picks.add(selectNoSchemas);
         JPanel top = new JPanel(new BorderLayout());
-        top.add(allSchemas, BorderLayout.WEST);
+        top.add(picks, BorderLayout.WEST);
         top.add(refresh, BorderLayout.EAST);
 
         JPanel panel = new JPanel(new BorderLayout(0, JBUI.scale(6)));
@@ -1000,6 +1008,8 @@ public final class ConnectionDialog extends DialogWrapper {
         keepAliveSeconds.setEnabled(keepAlive.isSelected());
         autoDisconnectSeconds.setEnabled(autoDisconnect.isSelected());
         schemaList.setEnabled(!allSchemas.isSelected());
+        selectAllSchemas.setEnabled(!allSchemas.isSelected());
+        selectNoSchemas.setEnabled(!allSchemas.isSelected());
         if (!loading) {
             resetSchemasOnScopeChange();
         }
