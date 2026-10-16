@@ -94,6 +94,18 @@ final class SchemaCheckTree {
         return values;
     }
 
+    /** Checks (or unchecks) every listed schema and database, to start a pick from all or from none. */
+    void setAllChecked(boolean checked) {
+        java.util.Enumeration<javax.swing.tree.TreeNode> nodes = root.depthFirstEnumeration();
+        while (nodes.hasMoreElements()) {
+            CheckedTreeNode node = (CheckedTreeNode) nodes.nextElement();
+            if (node != root) {
+                node.setChecked(checked);
+            }
+        }
+        tree.repaint();
+    }
+
     /** Number of schemas listed (databases not counted). */
     int schemaCount() {
         int count = 0;

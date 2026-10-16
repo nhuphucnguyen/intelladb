@@ -42,6 +42,20 @@ public class SchemaCheckTreeIdeTest extends BasePlatformTestCase {
         assertEquals(List.of("shop.public", "hr.staff"), picker.checked());
     }
 
+    public void testSelectNoneThenPickAFew() {
+        picker.setAllChecked(false);
+        assertEquals(List.of(), picker.checked());
+        clickCheckbox(2); // sales
+        assertEquals(List.of("shop.sales"), picker.checked());
+    }
+
+    public void testSelectAllThenDropAFew() {
+        picker.setAllChecked(true);
+        assertEquals(List.of("shop.public", "shop.sales", "hr.staff"), picker.checked());
+        clickCheckbox(3); // hr: all → none
+        assertEquals(List.of("shop.public", "shop.sales"), picker.checked());
+    }
+
     private void clickCheckbox(int row) {
         Rectangle r = tree.getRowBounds(row);
         int x = r.x + 8;
