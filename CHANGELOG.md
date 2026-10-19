@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+#### Changed
+- Picking **Playground** or **Script** in the run-mode dropdown only switches the mode — nothing
+  runs until you click Execute (or press Ctrl/Cmd+Enter).
+
 ## 0.4.1 — 2026-10-16
 
 #### Added

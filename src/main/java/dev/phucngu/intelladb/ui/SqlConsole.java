@@ -711,8 +711,8 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         explorer.withSession(config(), session -> start(session, statements, null));
     }
 
-    /** "Playground ▾ / Script ▾" — what Execute runs; each entry also runs right away,
-     * plus running the selection as one statement. */
+    /** "Playground ▾ / Script ▾" — what Execute runs; picking a mode only switches it (nothing
+     * runs until Execute), plus running the selection as one statement. */
     private final class RunModeAction extends ComboBoxAction {
         private final Editor editor;
 
@@ -726,12 +726,11 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         protected @NotNull DefaultActionGroup createPopupActionGroup(@NotNull JComponent button,
                                                                      @NotNull DataContext context) {
             DefaultActionGroup group = new DefaultActionGroup();
-            group.add(new DumbAwareAction("Execute Playground (statement at caret)",
+            group.add(new DumbAwareAction("Playground (statement at caret)",
                     RunMode.PLAYGROUND.description, null) {
                 @Override
                 public void actionPerformed(@NotNull AnActionEvent e) {
                     runMode = RunMode.PLAYGROUND;
-                    execute(editor);
                 }
             });
             group.add(new DumbAwareAction("Execute Selection as Single Statement",
@@ -741,12 +740,11 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
                     executeSelectionAsOne(editor);
                 }
             });
-            group.add(new DumbAwareAction("Execute Script (whole console)",
+            group.add(new DumbAwareAction("Script (whole console)",
                     RunMode.SCRIPT.description, null) {
                 @Override
                 public void actionPerformed(@NotNull AnActionEvent e) {
                     runMode = RunMode.SCRIPT;
-                    execute(editor);
                 }
             });
             return group;
