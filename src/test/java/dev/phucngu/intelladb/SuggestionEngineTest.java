@@ -141,6 +141,19 @@ class SuggestionEngineTest {
     }
 
     @Test
+    void postgresReservedNamesAreInsertedQuoted() {
+        SchemaCatalog catalog = new SchemaCatalog(List.of(new SchemaCatalog.Schema("app", List.of(
+                table("user", TableMeta.Kind.TABLE, "id", "order"),
+                table("user_profile", TableMeta.Kind.TABLE, "id")))));
+        CompletionScope scope = CompletionScope.of(new PostgresDialect(), catalog, "app").withTableAliases(false);
+        // Unquoted, "from user" reads the current role, not the table.
+        List<Suggestion> tables = suggest("SELECT * FROM us|", scope);
+        assertEquals(Set.of("\"user\"", "user_profile"), inserts(tables, Kind.TABLE));
+        assertTrue(tables.stream().anyMatch(s -> s.lookup().equals("user") && s.insertText().equals("\"user\"")));
+        assertTrue(inserts(suggest("SELECT | FROM \"user\"", scope), Kind.COLUMN).contains("\"order\""));
+    }
+
+    @Test
     void mysqlQuotesWithBackticksAndQualifiesWithoutACurrentDatabase() {
         CompletionScope mysql = CompletionScope.of(new MySqlDialect(), CATALOG, null);
         assertTrue(inserts(suggest("SELECT * FROM |", mysql), Kind.TABLE)

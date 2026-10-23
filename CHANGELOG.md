@@ -25,6 +25,9 @@
   failed statement is undone; fix it and run again, and the earlier work is still pending.
 - Saved passwords are kept for every connection. On macOS all connections shared one keychain
   entry, so saving a password for one connection replaced the other's and it asked again.
+- PostgreSQL: completion quotes table and column names that are reserved words — picking the
+  table `user` inserts `"user"`. Unquoted, `select * from user` returns the current role instead
+  of the table. Edits, DDL and the schema switch quote them too.
 
 ## 0.4.1 — 2026-10-16
 

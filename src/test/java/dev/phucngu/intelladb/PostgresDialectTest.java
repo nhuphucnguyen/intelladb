@@ -22,6 +22,12 @@ class PostgresDialectTest {
     void sqlSyntax() {
         assertEquals("customers", dialect.quote("customers"));
         assertEquals("\"CamelCase\"", dialect.quote("CamelCase"));
+        // Reserved words only name a table or column when quoted: unquoted, user is the current role.
+        assertEquals("\"user\"", dialect.quote("user"));
+        assertEquals("\"order\"", dialect.quote("order"));
+        assertEquals("users", dialect.quote("users"));
+        assertEquals("\"my-app\"", dialect.quote("my-app"));
+        assertEquals("\"say \"\"hi\"\"\"", dialect.quote("say \"hi\""));
         assertEquals("SELECT * FROM t LIMIT 200", dialect.limit("SELECT * FROM t", 200));
         assertEquals("SET search_path TO \"My Schema\"", dialect.useNamespaceStatement("My Schema"));
         assertEquals("public", dialect.defaultSchema());

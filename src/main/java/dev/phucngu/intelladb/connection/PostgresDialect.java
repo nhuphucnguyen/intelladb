@@ -23,6 +23,23 @@ public final class PostgresDialect implements DbDialect {
     private static final List<String> SSL_MODES =
             List.of("require", "verify-ca", "verify-full", "prefer", "allow", "disable");
 
+    /**
+     * PostgreSQL's reserved key words (Appendix C, both "reserved" columns): unquoted, they
+     * are not a table or column name — {@code select * from user} returns the current role.
+     */
+    private static final Set<String> RESERVED = Set.of(
+            "all", "analyse", "analyze", "and", "any", "array", "as", "asc", "asymmetric", "authorization",
+            "binary", "both", "case", "cast", "check", "collate", "collation", "column", "concurrently",
+            "constraint", "create", "cross", "current_catalog", "current_date", "current_role", "current_schema",
+            "current_time", "current_timestamp", "current_user", "default", "deferrable", "desc", "distinct",
+            "do", "else", "end", "except", "false", "fetch", "for", "foreign", "freeze", "from", "full", "grant",
+            "group", "having", "ilike", "in", "initially", "inner", "intersect", "into", "is", "isnull", "join",
+            "lateral", "leading", "left", "like", "limit", "localtime", "localtimestamp", "natural", "not",
+            "notnull", "null", "offset", "on", "only", "or", "order", "outer", "overlaps", "placing", "primary",
+            "references", "returning", "right", "select", "session_user", "similar", "some", "symmetric",
+            "system_user", "table", "tablesample", "then", "to", "trailing", "true", "union", "unique", "user",
+            "using", "variadic", "verbose", "when", "where", "window", "with");
+
     private static final SqlVocabulary VOCABULARY = SqlVocabulary.ANSI.plus(
             SqlVocabulary.words("concurrently", "conflict", "do", "filter", "ilike", "lateral", "materialized",
                     "nothing", "nulls", "returning", "similar", "tablesample", "within"),
@@ -144,6 +161,14 @@ public final class PostgresDialect implements DbDialect {
     @Override
     public @Nullable String useNamespaceStatement(@NotNull String namespace) {
         return "SET search_path TO " + quote(namespace);
+    }
+
+    @Override
+    public @NotNull String quote(@NotNull String identifier) {
+        if (identifier.matches("[a-z_][a-z0-9_$]*") && !RESERVED.contains(identifier)) {
+            return identifier;
+        }
+        return '"' + identifier.replace("\"", "\"\"") + '"';
     }
 
     @Override
