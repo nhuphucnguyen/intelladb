@@ -68,6 +68,10 @@ public final class PostgresDialect implements DbDialect {
     @Override
     public @NotNull Properties connectionProperties(@NotNull DbConfig config) {
         Properties props = new Properties();
+        // A failed statement aborts the whole PostgreSQL transaction ("current transaction is
+        // aborted, commands ignored…"); with autosave the driver wraps each statement of a
+        // manual transaction in a savepoint and rolls back only the one that failed.
+        props.setProperty("autosave", "always");
         if (config.sslMode) {
             props.setProperty("sslmode", config.sslModeName.isBlank() ? "require" : config.sslModeName);
             putIfSet(props, "sslrootcert", config.sslRootCert);

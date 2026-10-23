@@ -1,5 +1,6 @@
 package dev.phucngu.intelladb;
 
+import dev.phucngu.intelladb.connection.DbConfig;
 import dev.phucngu.intelladb.connection.NamespaceModel;
 import dev.phucngu.intelladb.connection.PostgresDialect;
 import dev.phucngu.intelladb.util.SqlSplitter;
@@ -36,6 +37,11 @@ class PostgresDialectTest {
         assertTrue(dialect.isSystemSchema("pg_temp_3"));
         assertTrue(dialect.isSystemSchema("pg_toast_temp_3"));
         assertFalse(dialect.isSystemSchema("public"));
+    }
+
+    @Test
+    void failedStatementDoesNotAbortTheManualTransaction() {
+        assertEquals("always", dialect.connectionProperties(new DbConfig()).getProperty("autosave"));
     }
 
     @Test

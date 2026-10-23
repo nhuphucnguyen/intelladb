@@ -6,6 +6,11 @@
 - Picking **Playground** or **Script** in the run-mode dropdown only switches the mode — nothing
   runs until you click Execute (or press Ctrl/Cmd+Enter).
 
+#### Fixed
+- PostgreSQL, **Tx: Manual**: a failed statement no longer leaves the transaction stuck on
+  "current transaction is aborted, commands ignored until end of transaction block". Only the
+  failed statement is undone; fix it and run again, and the earlier work is still pending.
+
 ## 0.4.1 — 2026-10-16
 
 #### Added

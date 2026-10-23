@@ -233,6 +233,26 @@ class MetadataLoaderPostgresTest {
         }
     }
 
+    @Test
+    void failedStatementKeepsTheManualTransactionUsable() throws SQLException {
+        DbConfig config = new DbConfig();
+        config.jdbcUrlOverride = env("INTELLADB_TEST_URL", "jdbc:postgresql://localhost:5432/intelladb");
+        config.user = env("INTELLADB_TEST_USER", "intella");
+        String owner = SCHEMA + ".owner";
+        try (DbSession session = new DbSession(config, env("INTELLADB_TEST_PASSWORD", "intella123"))) {
+            session.setAutoCommit(false);
+            assertTrue(session.execute("INSERT INTO " + owner + " (id, code) VALUES (201, 'p')").isSuccessful());
+            assertFalse(session.execute("SELEC 1").isSuccessful());
+            // The fixed statement runs, and the work before the typo is still pending.
+            SqlResult retried = session.execute("INSERT INTO " + owner + " (id, code) VALUES (202, 'q')");
+            assertTrue(retried.isSuccessful(), retried.text);
+            assertEquals("p,q", codes(session, owner));
+            session.rollback();
+            session.setAutoCommit(true);
+            assertEquals("", codes(session, owner));
+        }
+    }
+
     private static String codes(DbSession session, String owner) {
         SqlResult result = session.execute("SELECT code FROM " + owner + " WHERE id > 100 ORDER BY id");
         return result.rows.stream().map(row -> String.valueOf(row[0])).collect(java.util.stream.Collectors.joining(","));
