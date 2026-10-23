@@ -1,6 +1,7 @@
 package dev.phucngu.intelladb.connection;
 
 import com.intellij.credentialStore.CredentialAttributes;
+import com.intellij.credentialStore.CredentialAttributesKt;
 import com.intellij.credentialStore.Credentials;
 import com.intellij.ide.passwordSafe.PasswordSafe;
 import com.intellij.openapi.Disposable;
@@ -160,7 +161,16 @@ public final class ConnectionManager implements PersistentStateComponent<Connect
 
     // ------------------------------------------------------------------ passwords
 
-    private static @NotNull CredentialAttributes attributes(@NotNull String configId) {
+    /**
+     * One service name per connection: the macOS keychain finds the entry to overwrite by
+     * service name alone, so a shared name left a single entry that every save took over.
+     */
+    static @NotNull CredentialAttributes attributes(@NotNull String configId) {
+        return new CredentialAttributes(CredentialAttributesKt.generateServiceName("Intella DB", configId), configId);
+    }
+
+    /** Where passwords were stored up to 0.4.1; read once and moved to {@link #attributes}. */
+    private static @NotNull CredentialAttributes legacyAttributes(@NotNull String configId) {
         return new CredentialAttributes("Intella DB", configId, ConnectionManager.class, false);
     }
 
@@ -175,6 +185,7 @@ public final class ConnectionManager implements PersistentStateComponent<Connect
     private static void clearPassword(@NotNull String configId) {
         try {
             PasswordSafe.getInstance().set(attributes(configId), null);
+            PasswordSafe.getInstance().set(legacyAttributes(configId), null);
         } catch (Exception ignored) {
         }
     }
@@ -189,6 +200,14 @@ public final class ConnectionManager implements PersistentStateComponent<Connect
         }
         try {
             Credentials credentials = PasswordSafe.getInstance().get(attributes(config.id));
+            if (credentials == null) {
+                credentials = PasswordSafe.getInstance().get(legacyAttributes(config.id));
+                String legacy = credentials != null ? credentials.getPasswordAsString() : null;
+                if (legacy != null && !legacy.isBlank()) {
+                    storePassword(config.id, legacy);
+                    PasswordSafe.getInstance().set(legacyAttributes(config.id), null);
+                }
+            }
             return credentials != null ? credentials.getPasswordAsString() : null;
         } catch (Exception e) {
             return null;

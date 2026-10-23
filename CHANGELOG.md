@@ -10,6 +10,8 @@
 - PostgreSQL, **Tx: Manual**: a failed statement no longer leaves the transaction stuck on
   "current transaction is aborted, commands ignored until end of transaction block". Only the
   failed statement is undone; fix it and run again, and the earlier work is still pending.
+- Saved passwords are kept for every connection. On macOS all connections shared one keychain
+  entry, so saving a password for one connection replaced the other's and it asked again.
 
 ## 0.4.1 — 2026-10-16
 
