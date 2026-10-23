@@ -800,7 +800,12 @@ public final class ConnectionDialog extends DialogWrapper {
         }
         for (String id : removed) {
             manager.deleteConfig(id);
-            ConsoleStore.getInstance(project).remove(id);
+            DbExplorerPanel explorer = DbExplorerPanel.find(project);
+            if (explorer != null) {
+                explorer.deleteConsolesOf(id); // closes their tabs too
+            } else {
+                ConsoleStore.getInstance(project).remove(id);
+            }
         }
         removed.clear();
         for (Draft draft : drafts) {

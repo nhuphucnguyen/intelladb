@@ -19,7 +19,7 @@ import java.awt.Color;
  * a console icon, the console header toolbar installed whenever a console tab opens
  * (including reopen after close), and the connection's marker color as the tab tint.
  * Also records which console tabs are open, so they come back after a restart
- * (see {@link ConsoleRestoreStartup}).
+ * (see {@link ConsoleRestoreStartup}), and lets an empty console go when its tab closes.
  */
 public final class ConsoleFilePresentation implements EditorTabTitleProvider, FileIconProvider,
         EditorTabColorProvider, FileEditorManagerListener {
@@ -57,6 +57,7 @@ public final class ConsoleFilePresentation implements EditorTabTitleProvider, Fi
         SqlConsole console = file.getUserData(SqlConsole.KEY);
         if (console != null) {
             ConsoleStore.getInstance(source.getProject()).setOpen(console.consoleId(), false);
+            console.explorer().consoleClosed(console);
         }
     }
 }

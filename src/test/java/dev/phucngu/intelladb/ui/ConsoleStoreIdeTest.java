@@ -55,6 +55,59 @@ public class ConsoleStoreIdeTest extends BasePlatformTestCase {
         assertNull(store.find(second.id));
     }
 
+    public void testDeletingFreesTheNameAndTracksUse() {
+        ConsoleStore store = ConsoleStore.getInstance(getProject());
+        store.loadState(new ConsoleStore.State());
+        long before = System.currentTimeMillis();
+        ConsoleStore.ConsoleState first = store.create("conn-1");
+        ConsoleStore.ConsoleState second = store.create("conn-1");
+        assertTrue(first.lastUsed >= before);
+
+        store.delete(List.of(first.id));
+        assertNull(store.find(first.id));
+        assertEquals(List.of(second.id), store.ofConnection("conn-1").stream().map(c -> c.id).toList());
+        // "console" is free again; "console 2" is still taken.
+        String third = store.create("conn-1").name;
+        assertEquals("console", third);
+        String fourth = store.create("conn-1").name;
+        assertEquals("console 3", fourth);
+
+        ConsoleStore.ConsoleState idle = store.find(second.id);
+        idle.lastUsed = 1;
+        store.touch(second.id);
+        long touched = store.find(second.id).lastUsed;
+        assertTrue(touched >= before);
+        store.find(second.id).lastUsed = 1;
+        store.setSql(second.id, "SELECT 1");
+        long edited = store.find(second.id).lastUsed;
+        assertTrue(edited >= before);
+    }
+
+    public void testOnlyBlankOrHeaderOnlyConsolesAreEmpty() {
+        assertTrue(ConsoleStore.isEmpty(null));
+        assertTrue(ConsoleStore.isEmpty("  \n"));
+        assertTrue(ConsoleStore.isEmpty("-- SQL for postgres@localhost\n"));
+        assertTrue(ConsoleStore.isEmpty("// MongoDB shell for mongo@localhost, e.g. db.collection.find({})\n\n"));
+        assertFalse(ConsoleStore.isEmpty("-- SQL for postgres@localhost\nSELECT 1"));
+        assertFalse(ConsoleStore.isEmpty("-- my notes about the migration"));
+        assertFalse(ConsoleStore.isEmpty("SELECT 1"));
+    }
+
+    public void testScopeAndPreview() {
+        ConsoleStore.ConsoleState console = new ConsoleStore.ConsoleState();
+        assertEquals("", ConsoleStore.scope(console));
+        console.schema = "sales";
+        assertEquals("sales", ConsoleStore.scope(console));
+        console.database = "shop";
+        assertEquals("shop.sales", ConsoleStore.scope(console));
+        console.schema = null;
+        assertEquals("shop", ConsoleStore.scope(console));
+
+        assertEquals("SELECT * FROM orders", ConsoleStore.preview("-- SQL for pg@localhost\n\n  SELECT * FROM orders\nWHERE 1"));
+        assertEquals("", ConsoleStore.preview("-- SQL for pg@localhost\n"));
+        assertEquals("", ConsoleStore.preview(null));
+    }
+
     public void testSettersOnUnknownConsoleIdsAreIgnored() {
         ConsoleStore store = ConsoleStore.getInstance(getProject());
         store.loadState(new ConsoleStore.State());

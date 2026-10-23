@@ -67,6 +67,9 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
 
     /** Links a console file back to its console. */
     static final Key<SqlConsole> KEY = Key.create("intelladb.sqlConsole");
+    /** The first line of a new console, before the connection's description. */
+    static final String SQL_HEADER = "-- SQL for ";
+    static final String MONGO_HEADER = "// MongoDB shell for ";
     private static final Key<Boolean> HEADER_INSTALLED = Key.create("intelladb.sqlConsole.header");
     private static final Pattern FROM_TABLE = Pattern.compile(
             "(?is)^\\s*(?:select|table)\\b.*?\\bfrom\\s+((?:\"[^\"]+\"|`[^`]+`|[\\w$]+)"
@@ -123,9 +126,9 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         boolean mongo = dialect.consoleLanguage() == ConsoleLanguage.MONGO_SHELL;
         this.file = mongo
                 ? new LightVirtualFile("console.mongodb", MongoShellLanguage.FileType.INSTANCE,
-                "// MongoDB shell for " + config.describe() + ", e.g. db.collection.find({})\n")
+                MONGO_HEADER + config.describe() + ", e.g. db.collection.find({})\n")
                 : new LightVirtualFile("console.sql", IntellaSqlFileType.INSTANCE,
-                "-- SQL for " + config.describe() + "\n");
+                SQL_HEADER + config.describe() + "\n");
         file.putUserData(KEY, this);
         file.putUserData(SqlCompletionContributor.SCOPE, this::completionScope);
         this.document = FileDocumentManager.getInstance().getDocument(file);
@@ -182,9 +185,22 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         editor.getScrollingModel().scrollToCaret(com.intellij.openapi.editor.ScrollType.MAKE_VISIBLE);
     }
 
-    /** Tab / tree title, e.g. {@code console [@localhost]} or {@code queries [@localhost]}. */
+    /**
+     * Tab title, e.g. {@code console [@localhost]}, or {@code queries [@localhost · shop.sales]}
+     * once a schema is picked — it follows the schema switcher.
+     */
     @NotNull String title() {
-        return name + " [@" + config().name + "]";
+        ConsoleStore.ConsoleState saved = ConsoleStore.getInstance(project).find(id);
+        String scope = saved == null ? "" : ConsoleStore.scope(saved);
+        return name + " [@" + config().name + (scope.isEmpty() ? "" : " · " + scope) + "]";
+    }
+
+    @NotNull DbExplorerPanel explorer() {
+        return explorer;
+    }
+
+    boolean isRunning() {
+        return running;
     }
 
     /** This console's id in the {@link ConsoleStore}. */
@@ -235,6 +251,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
         schema = name;
         ConsoleStore.getInstance(project).setSchema(id, this.database, name);
         toolbars.forEach(ActionToolbar::updateActionsAsync); // show it now, not on the next UI tick
+        FileEditorManager.getInstance(project).updateFilePresentation(file); // the tab title's scope
     }
 
     /**
@@ -424,6 +441,7 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
             into.showRunning();
         }
         hub.reveal(this);
+        ConsoleStore.getInstance(project).touch(id);
         running = true;
         cancelled = false;
         boolean autoCommit = txMode == TxMode.AUTO;
@@ -795,6 +813,13 @@ public final class SqlConsole implements Disposable, ResultsPanel.Host {
                 @Override
                 public void actionPerformed(@NotNull AnActionEvent e) {
                     explorer.newConsole(config(), database, schema);
+                }
+            });
+            group.add(new DumbAwareAction("Manage Consoles…", "See, open and delete the consoles of every connection",
+                    AllIcons.General.Settings) {
+                @Override
+                public void actionPerformed(@NotNull AnActionEvent e) {
+                    new ManageConsolesDialog(project, explorer, config().id).show();
                 }
             });
             return group;

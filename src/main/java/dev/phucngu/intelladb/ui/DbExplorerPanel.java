@@ -209,6 +209,78 @@ public final class DbExplorerPanel extends SimpleToolWindowPanel implements Disp
                 null, database, schema, true);
     }
 
+    /**
+     * Opens a saved console by id, without connecting — it connects on the first run.
+     * False when its connection no longer exists.
+     */
+    public boolean openConsoleById(@NotNull String consoleId) {
+        ConsoleStore.ConsoleState state = ConsoleStore.getInstance(project).find(consoleId);
+        DbConfig config = state == null ? null : manager.findConfig(state.connectionId);
+        if (config == null) {
+            return false;
+        }
+        openConsoleState(config, state);
+        return true;
+    }
+
+    /** Renames a console, open or not; an open tab's title follows. */
+    public void renameConsole(@NotNull String consoleId, @NotNull String name) {
+        SqlConsole live = consoles.get(consoleId);
+        if (live != null) {
+            live.rename(name);
+        } else {
+            ConsoleStore.getInstance(project).setName(consoleId, name);
+        }
+    }
+
+    /** Deletes consoles: their open tabs close and their text and results are gone. */
+    public void deleteConsoles(@NotNull java.util.Collection<String> consoleIds) {
+        for (String id : List.copyOf(consoleIds)) {
+            SqlConsole live = consoles.remove(id); // first, so the tab closing below isn't seen as a user close
+            if (live != null) {
+                FileEditorManager.getInstance(project).closeFile(live.file());
+                ResultsHub.getInstance(project).forget(live);
+                Disposer.dispose(live);
+            }
+        }
+        ConsoleStore.getInstance(project).delete(consoleIds);
+    }
+
+    /** Deletes every console of a connection (the connection itself is being deleted). */
+    public void deleteConsolesOf(@NotNull String connectionId) {
+        deleteConsoles(ConsoleStore.getInstance(project).ofConnection(connectionId).stream()
+                .map(c -> c.id).toList());
+    }
+
+    /** Deletes the connection's consoles that hold nothing but the header; returns how many. */
+    public int deleteEmptyConsoles(@Nullable String connectionId) {
+        List<String> empty = ConsoleStore.getInstance(project).all().stream()
+                .filter(c -> connectionId == null || c.connectionId.equals(connectionId))
+                .filter(c -> ConsoleStore.isEmpty(c.sql))
+                .filter(c -> consoles.get(c.id) == null || !consoles.get(c.id).isRunning())
+                .map(c -> c.id)
+                .toList();
+        deleteConsoles(empty);
+        return empty.size();
+    }
+
+    /**
+     * A console tab was closed by the user: an empty console goes away, so "New console"
+     * clicks don't pile up; one with text stays, to be reopened from the tree.
+     */
+    void consoleClosed(@NotNull SqlConsole console) {
+        if (consoles.get(console.consoleId()) == console && !console.isRunning()
+                && !ConsoleStore.getInstance(project).isClosing() && ConsoleStore.isEmpty(console.sql())) {
+            deleteConsoles(List.of(console.consoleId()));
+        }
+    }
+
+    /** Whether the console currently has an editor tab. */
+    boolean isConsoleOpen(@NotNull String consoleId) {
+        SqlConsole live = consoles.get(consoleId);
+        return live != null && FileEditorManager.getInstance(project).isFileOpen(live.file());
+    }
+
     /** Reopens (without focus) the console tabs that were open when the IDE last closed. */
     public void restoreConsoles() {
         ConsoleStore store = ConsoleStore.getInstance(project);

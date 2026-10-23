@@ -51,6 +51,15 @@ public final class ResultsHub implements Disposable {
         return view;
     }
 
+    /** Drops a deleted console's results. */
+    void forget(@NotNull SqlConsole console) {
+        ConsoleResultsView view = views.remove(console);
+        if (view != null) {
+            Disposer.dispose(view);
+            listeners.forEach(Runnable::run);
+        }
+    }
+
     @NotNull List<ConsoleResultsView> views() {
         return new ArrayList<>(views.values());
     }

@@ -27,6 +27,8 @@ import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.tree.ui.ClassicPainter;
 import com.intellij.ui.tree.ui.Control;
 import com.intellij.ui.treeStructure.Tree;
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.util.text.DateFormatUtil;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import dev.phucngu.intelladb.IntellaDbIcons;
@@ -87,6 +89,17 @@ public final class ConnectionTreePanel implements Disposable {
     }
 
     public record ColumnEntry(DbConfig config, String schema, String table, String name, String type, boolean pk) {
+    }
+
+    /** The connection's "consoles" node, first under the connection, shown whenever it owns one. */
+    public record ConsolesEntry(DbConfig config, int count) {
+    }
+
+    /** One saved console; the store edits {@code state} in place, so painting shows its current name and text. */
+    public record ConsoleEntry(DbConfig config, ConsoleStore.ConsoleState state) {
+        String consoleId() {
+            return state.id;
+        }
     }
 
     /** Folder nodes, in display order within their parent. */
@@ -179,6 +192,13 @@ public final class ConnectionTreePanel implements Disposable {
                 explorer.openDdl(table);
             }
         });
+        registerTreeShortcut(IdeActions.ACTION_DELETE, () -> {
+            List<String> selected = selectedConsoleIds();
+            if (!selected.isEmpty()) {
+                deleteConsoles(selected);
+            }
+        });
+        ConsoleStore.getInstance(project).addListener(this::rebuild, this);
 
         dev.phucngu.intelladb.connection.SessionOpener.getInstance(project)
                 .addListener(new dev.phucngu.intelladb.connection.SessionOpener.Listener() {
@@ -238,6 +258,8 @@ public final class ConnectionTreePanel implements Disposable {
             case TableEntry t -> t.meta().name;
             case ColumnEntry col -> col.name() + " " + col.type();
             case ObjectEntry o -> o.name() + " " + o.detail();
+            case ConsolesEntry c -> "consoles";
+            case ConsoleEntry c -> c.state().name;
             case String s -> s;
             default -> node.getUserObject().toString();
         };
@@ -262,9 +284,21 @@ public final class ConnectionTreePanel implements Disposable {
     private void fill() {
         DefaultMutableTreeNode root = (DefaultMutableTreeNode) model.getRoot();
         root.removeAllChildren();
+        ConsoleStore consoleStore = ConsoleStore.getInstance(project);
         for (DbConfig config : manager.configs()) {
             DefaultMutableTreeNode configNode = new DefaultMutableTreeNode(new ConfigEntry(config));
             root.add(configNode);
+            // Consoles belong to the connection, not a schema: they switch schemas freely and
+            // are reachable without connecting or expanding databases.
+            List<ConsoleStore.ConsoleState> consoles = consoleStore.ofConnection(config.id);
+            if (!consoles.isEmpty()) {
+                DefaultMutableTreeNode consolesNode =
+                        new DefaultMutableTreeNode(new ConsolesEntry(config, consoles.size()));
+                configNode.add(consolesNode);
+                for (ConsoleStore.ConsoleState console : consoles) {
+                    consolesNode.add(new DefaultMutableTreeNode(new ConsoleEntry(config, console), false));
+                }
+            }
             DbSession session = manager.session(config.id);
             String state = transientState.get(config.id);
             if (session != null && session.catalog() != null) {
@@ -481,6 +515,8 @@ public final class ConnectionTreePanel implements Disposable {
                     case ColumnEntry col -> sb.append("/col:").append(col.name());
                     case ObjectEntry o -> sb.append("/o:").append(o.kind()).append(':').append(o.name())
                             .append(o.detail());
+                    case ConsolesEntry c -> sb.append("/consoles");
+                    case ConsoleEntry c -> sb.append("/console:").append(c.consoleId());
                     default -> {
                     }
                 }
@@ -530,6 +566,20 @@ public final class ConnectionTreePanel implements Disposable {
         return null;
     }
 
+    /** The consoles among the selected nodes (the tree allows multi-selection). */
+    private @NotNull List<String> selectedConsoleIds() {
+        List<String> ids = new ArrayList<>();
+        TreePath[] paths = tree.getSelectionPaths();
+        if (paths != null) {
+            for (TreePath path : paths) {
+                if (((DefaultMutableTreeNode) path.getLastPathComponent()).getUserObject() instanceof ConsoleEntry c) {
+                    ids.add(c.consoleId());
+                }
+            }
+        }
+        return ids;
+    }
+
     public @Nullable TableRef selectedTable() {
         Object entry = selectedEntry();
         if (entry instanceof TableEntry table) {
@@ -562,9 +612,9 @@ public final class ConnectionTreePanel implements Disposable {
         DefaultMutableTreeNode root = (DefaultMutableTreeNode) model.getRoot();
         for (int i = 0; i < root.getChildCount(); i++) {
             DefaultMutableTreeNode configNode = (DefaultMutableTreeNode) root.getChildAt(i);
+            DefaultMutableTreeNode databaseNode = firstCatalogChild(configNode);
             if (configNode.getUserObject() instanceof ConfigEntry c && c.config().id.equals(config.id)
-                    && configNode.getChildCount() > 0
-                    && configNode.getFirstChild() instanceof DefaultMutableTreeNode databaseNode) {
+                    && databaseNode != null) {
                 if (config.allDatabases()) {
                     tree.expandPath(new TreePath(configNode.getPath()));
                 } else if (databaseNode.getUserObject() instanceof DatabaseEntry) {
@@ -574,6 +624,17 @@ public final class ConnectionTreePanel implements Disposable {
                 }
             }
         }
+    }
+
+    /** The connection's first child past its consoles node: a database, or a schema. */
+    private static @Nullable DefaultMutableTreeNode firstCatalogChild(@NotNull DefaultMutableTreeNode configNode) {
+        for (int i = 0; i < configNode.getChildCount(); i++) {
+            DefaultMutableTreeNode child = (DefaultMutableTreeNode) configNode.getChildAt(i);
+            if (!(child.getUserObject() instanceof ConsolesEntry)) {
+                return child;
+            }
+        }
+        return null;
     }
 
     private void onFailed(@NotNull DbConfig config, @NotNull String message) {
@@ -626,15 +687,67 @@ public final class ConnectionTreePanel implements Disposable {
     }
 
     private void deleteConnection(@NotNull DbConfig config) {
+        int consoles = ConsoleStore.getInstance(project).ofConnection(config.id).size();
         int answer = Messages.showYesNoDialog(project,
                 "Delete connection '" + config.name + "'?" + (manager.isGlobal(config.id)
-                        ? "\nIt is global: this removes it from all projects." : ""),
+                        ? "\nIt is global: this removes it from all projects." : "")
+                        + (consoles == 0 ? "" : "\nIts " + consoles + (consoles == 1 ? " console is" : " consoles are")
+                        + " deleted too."),
                 "Intella DB", Messages.getQuestionIcon());
         if (answer == Messages.YES) {
             manager.deleteConfig(config.id);
-            ConsoleStore.getInstance(project).remove(config.id);
+            explorer.deleteConsolesOf(config.id);
             explorer.refreshTree();
         }
+    }
+
+    // ------------------------------------------------------------------ consoles
+
+    private void openConsoleEntry(@NotNull String consoleId) {
+        if (!explorer.openConsoleById(consoleId)) {
+            setHint("That console's connection no longer exists");
+        }
+    }
+
+    private void renameConsole(@NotNull String consoleId) {
+        ConsoleStore.ConsoleState console = ConsoleStore.getInstance(project).find(consoleId);
+        if (console == null) {
+            return;
+        }
+        String entered = Messages.showInputDialog(project, "Console name:", "Rename Console", null, console.name, null);
+        if (entered != null && !entered.isBlank()) {
+            explorer.renameConsole(consoleId, entered);
+        }
+    }
+
+    /** Asks first: a deleted console's SQL is gone. */
+    private void deleteConsoles(@NotNull List<String> consoleIds) {
+        ConsoleStore store = ConsoleStore.getInstance(project);
+        boolean allEmpty = consoleIds.stream().allMatch(id -> {
+            ConsoleStore.ConsoleState console = store.find(id);
+            return console == null || ConsoleStore.isEmpty(console.sql);
+        });
+        if (!allEmpty) {
+            ConsoleStore.ConsoleState first = store.find(consoleIds.get(0));
+            String what = consoleIds.size() == 1 && first != null
+                    ? "console '" + first.name + "'" : consoleIds.size() + " consoles";
+            int answer = Messages.showYesNoDialog(project,
+                    "Delete " + what + "? Its SQL is removed and open tabs close.",
+                    "Delete Console", Messages.getQuestionIcon());
+            if (answer != Messages.YES) {
+                return;
+            }
+        }
+        explorer.deleteConsoles(consoleIds);
+    }
+
+    private void deleteEmptyConsoles(@NotNull DbConfig config) {
+        int deleted = explorer.deleteEmptyConsoles(config.id);
+        setHint(deleted == 0 ? "No empty consoles" : "Deleted " + deleted + " empty console" + (deleted == 1 ? "" : "s"));
+    }
+
+    private void manageConsoles(@Nullable DbConfig config) {
+        new ManageConsolesDialog(project, explorer, config == null ? null : config.id).show();
     }
 
     public void connectSelected() {
@@ -743,7 +856,9 @@ public final class ConnectionTreePanel implements Disposable {
         if (path == null) {
             return;
         }
-        tree.setSelectionPath(path);
+        if (!tree.isPathSelected(path)) {
+            tree.setSelectionPath(path); // right-click inside a multi-selection keeps it
+        }
         Object entry = ((DefaultMutableTreeNode) path.getLastPathComponent()).getUserObject();
         DefaultActionGroup group = new DefaultActionGroup();
 
@@ -762,6 +877,8 @@ public final class ConnectionTreePanel implements Disposable {
             group.addSeparator();
             group.add(action("New SQL Console", "Open a fresh console for this connection",
                     com.intellij.icons.AllIcons.Nodes.Console, () -> newConsoleFor(config, null, null)));
+            group.add(action("Manage Consoles…", "See, open and delete this connection's consoles",
+                    AllIcons.General.Settings, () -> manageConsoles(config)));
             group.addSeparator();
             group.add(action("Edit Connection…", "Edit connection settings",
                     com.intellij.icons.AllIcons.Actions.Edit, () -> editConnection(config)));
@@ -837,6 +954,27 @@ public final class ConnectionTreePanel implements Disposable {
                     IntellaDbIcons.AI, () -> AiChatPanel.openInExplorer(project,
                             "Explain the table " + tableEntry.schema() + "."
                                     + tableEntry.meta().name + " and how it relates to other tables.")));
+        } else if (entry instanceof ConsolesEntry consolesEntry) {
+            DbConfig config = consolesEntry.config();
+            group.add(action("New SQL Console", "Open a fresh console for this connection",
+                    AllIcons.Nodes.Console, () -> newConsoleFor(config, null, null)));
+            group.addSeparator();
+            group.add(action("Delete Empty Consoles", "Delete this connection's consoles that hold no SQL",
+                    AllIcons.Actions.GC, () -> deleteEmptyConsoles(config)));
+            group.add(action("Manage Consoles…", "See, open and delete this connection's consoles",
+                    AllIcons.General.Settings, () -> manageConsoles(config)));
+        } else if (entry instanceof ConsoleEntry consoleEntry) {
+            List<String> selected = selectedConsoleIds();
+            if (selected.size() <= 1) {
+                group.add(action("Open", "Open this console in an editor tab",
+                        AllIcons.Actions.EditSource, () -> openConsoleEntry(consoleEntry.consoleId())));
+                group.add(action("Rename…", "Rename this console",
+                        AllIcons.Actions.Edit, () -> renameConsole(consoleEntry.consoleId())));
+                group.addSeparator();
+            }
+            group.add(action(selected.size() > 1 ? "Delete " + selected.size() + " Consoles…" : "Delete…",
+                    "Delete the console and its SQL", AllIcons.General.Remove,
+                    () -> deleteConsoles(selected.isEmpty() ? List.of(consoleEntry.consoleId()) : selected)));
         } else if (entry instanceof ColumnEntry columnEntry) {
             group.add(action("Copy Name", "Copy column name", com.intellij.icons.AllIcons.Actions.Copy,
                     () -> CopyPasteManager.getInstance().setContents(new StringSelection(columnEntry.name()))));
@@ -986,6 +1124,39 @@ public final class ConnectionTreePanel implements Disposable {
                     }
                     setIcon(col.pk() ? IntellaDbIcons.PRIMARY_KEY_COLUMN : IntellaDbIcons.COLUMN);
                 }
+                case ConsolesEntry c -> {
+                    plain.append("consoles");
+                    append("consoles", SimpleTextAttributes.REGULAR_ATTRIBUTES);
+                    setIcon(AllIcons.Nodes.Folder);
+                    if (options.objectCounts()) {
+                        plain.append(' ').append(c.count());
+                        append("  " + c.count(), SimpleTextAttributes.GRAYED_ATTRIBUTES);
+                    }
+                }
+                case ConsoleEntry c -> {
+                    ConsoleStore.ConsoleState console = c.state();
+                    setIcon(AllIcons.Nodes.Console);
+                    // Bold while it has a tab, like IntelliJ marks open files.
+                    plain.append(console.name);
+                    append(console.name, explorer.isConsoleOpen(console.id)
+                            ? SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES : SimpleTextAttributes.REGULAR_ATTRIBUTES);
+                    String scope = ConsoleStore.scope(console);
+                    if (!scope.isEmpty()) {
+                        plain.append("  ").append(scope);
+                        append("  " + scope, SimpleTextAttributes.GRAYED_ATTRIBUTES);
+                    }
+                    if (console.lastUsed > 0) {
+                        String used = DateFormatUtil.formatPrettyDateTime(console.lastUsed);
+                        plain.append("  · ").append(used);
+                        append("  · " + used, SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES);
+                    }
+                    String preview = ConsoleStore.preview(console.sql);
+                    if (!preview.isEmpty()) {
+                        plain.append("  · ").append(preview);
+                        append("  · " + StringUtil.shortenTextWithEllipsis(preview, 60, 0),
+                                SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES);
+                    }
+                }
                 case String s -> {
                     plain.append(s);
                     append(s, "connecting…".equals(s)
@@ -1041,6 +1212,8 @@ public final class ConnectionTreePanel implements Disposable {
                     }
                 } else if (entry instanceof TableEntry table) {
                     viewTableData(table.ref());
+                } else if (entry instanceof ConsoleEntry console) {
+                    openConsoleEntry(console.consoleId());
                 }
             }
         }

@@ -2,9 +2,22 @@
 
 ## Unreleased
 
+#### Added
+- **Consoles in the tree**: each connection lists its saved consoles under a **consoles** node —
+  name, current schema, when it was last used and its first line of SQL; bold while its tab is
+  open. Double-click to open (no connection needed until you run), right-click to rename or
+  delete (several at once, or with Delete). The node also offers **Delete Empty Consoles**.
+- **Manage Consoles…** (connection menu, consoles node, the console's **Consoles ▾** dropdown):
+  every console of every connection in one table with a SQL preview, filtered by connection,
+  empty, or not used for 7 / 30 / 90 days — open the useful ones, delete the rest.
+- A console's tab title shows the schema it runs against, e.g. `queries [@prod · shop.sales]`.
+
 #### Changed
 - Picking **Playground** or **Script** in the run-mode dropdown only switches the mode — nothing
   runs until you click Execute (or press Ctrl/Cmd+Enter).
+- Closing the tab of an empty console (nothing but its header line) deletes it, so repeated
+  **New console** clicks don't pile up. Consoles with any text are kept, as before.
+- Deleting a connection says how many consoles go with it, and closes their tabs.
 
 #### Fixed
 - PostgreSQL, **Tx: Manual**: a failed statement no longer leaves the transaction stuck on

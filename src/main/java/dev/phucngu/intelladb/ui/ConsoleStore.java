@@ -1,5 +1,7 @@
 package dev.phucngu.intelladb.ui;
 
+import com.intellij.openapi.Disposable;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.Service;
 import com.intellij.openapi.components.State;
@@ -7,12 +9,15 @@ import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.components.StoragePathMacros;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectCloseListener;
+import com.intellij.openapi.util.Disposer;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * What each SQL console had at the last save — text, name, default schema and whether its
@@ -37,6 +42,8 @@ public final class ConsoleStore implements PersistentStateComponent<ConsoleStore
         /** The schema's database when the connection browses every database; null for the one it starts on. */
         public @Nullable String database;
         public boolean open;
+        /** Epoch millis of the last edit or run; 0 for consoles saved before this was tracked. */
+        public long lastUsed;
     }
 
     private State state = new State();
@@ -45,8 +52,11 @@ public final class ConsoleStore implements PersistentStateComponent<ConsoleStore
      * not be remembered as the user closing the consoles.
      */
     private boolean closing;
+    private final Project project;
+    private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
 
     public ConsoleStore(@NotNull Project project) {
+        this.project = project;
         project.getMessageBus().connect().subscribe(ProjectCloseListener.TOPIC, new ProjectCloseListener() {
             @Override
             public void projectClosingBeforeSave(@NotNull Project closed) {
@@ -96,21 +106,57 @@ public final class ConsoleStore implements PersistentStateComponent<ConsoleStore
         return state.consoles.stream().filter(c -> c.open).map(c -> c.id).toList();
     }
 
-    /** A fresh named console for the connection ("console", then "console 2", …). */
+    /** Every saved console, oldest first. */
+    public @NotNull List<ConsoleState> all() {
+        return List.copyOf(state.consoles);
+    }
+
+    /** Whether the project is closing, when closed tabs are not the user's doing. */
+    boolean isClosing() {
+        return closing;
+    }
+
+    /**
+     * A fresh named console for the connection: "console", then "console 2", … — the first
+     * name the connection's consoles don't use, so deleting one doesn't produce duplicates.
+     */
     public @NotNull ConsoleState create(@NotNull String connectionId) {
         ConsoleState created = new ConsoleState();
         created.id = UUID.randomUUID().toString();
         created.connectionId = connectionId;
-        int existing = ofConnection(connectionId).size();
-        created.name = existing == 0 ? "console" : "console " + (existing + 1);
+        List<String> taken = ofConnection(connectionId).stream().map(c -> c.name).toList();
+        String name = "console";
+        for (int n = 2; taken.contains(name); n++) {
+            name = "console " + n;
+        }
+        created.name = name;
+        created.lastUsed = System.currentTimeMillis();
         state.consoles.add(created);
+        fireChanged();
         return created;
     }
 
+    /** Forgets the consoles, text and all. */
+    public void delete(@NotNull Collection<String> consoleIds) {
+        if (state.consoles.removeIf(c -> consoleIds.contains(c.id))) {
+            fireChanged();
+        }
+    }
+
+    /** An edit; it counts as use. */
     public void setSql(@NotNull String consoleId, @NotNull String sql) {
         ConsoleState console = find(consoleId);
         if (console != null) {
             console.sql = sql;
+            console.lastUsed = System.currentTimeMillis();
+        }
+    }
+
+    /** Marks the console used now (a run). */
+    public void touch(@NotNull String consoleId) {
+        ConsoleState console = find(consoleId);
+        if (console != null) {
+            console.lastUsed = System.currentTimeMillis();
         }
     }
 
@@ -119,6 +165,7 @@ public final class ConsoleStore implements PersistentStateComponent<ConsoleStore
         if (console != null) {
             console.database = database;
             console.schema = schema;
+            fireChanged();
         }
     }
 
@@ -126,14 +173,16 @@ public final class ConsoleStore implements PersistentStateComponent<ConsoleStore
         ConsoleState console = find(consoleId);
         if (console != null && name != null && !name.isBlank()) {
             console.name = name.strip();
+            fireChanged();
         }
     }
 
     public void setOpen(@NotNull String consoleId, boolean open) {
         if (!closing) {
             ConsoleState console = find(consoleId);
-            if (console != null) {
+            if (console != null && console.open != open) {
                 console.open = open;
+                fireChanged();
             }
         }
     }
@@ -145,11 +194,58 @@ public final class ConsoleStore implements PersistentStateComponent<ConsoleStore
             console.connectionId = connectionId;
             console.schema = null;
             console.database = null;
+            fireChanged();
         }
     }
 
     /** Forgets every console of a deleted connection. */
     public void remove(@NotNull String connectionId) {
-        state.consoles.removeIf(c -> c.connectionId.equals(connectionId));
+        if (state.consoles.removeIf(c -> c.connectionId.equals(connectionId))) {
+            fireChanged();
+        }
+    }
+
+    /**
+     * Whether the console holds nothing worth keeping: no text, or only the header line a
+     * new console starts with. A console with notes or SQL of the user's is never empty.
+     */
+    public static boolean isEmpty(@Nullable String sql) {
+        String text = sql == null ? "" : sql.strip();
+        return text.isEmpty() || !text.contains("\n")
+                && (text.startsWith(SqlConsole.SQL_HEADER) || text.startsWith(SqlConsole.MONGO_HEADER));
+    }
+
+    /** "database.schema", "schema" or "" — what the console runs against besides the connection default. */
+    public static @NotNull String scope(@NotNull ConsoleState console) {
+        String database = console.database == null || console.database.isBlank() ? null : console.database;
+        String schema = console.schema == null || console.schema.isBlank() ? null : console.schema;
+        if (database != null && schema != null) {
+            return database + "." + schema;
+        }
+        return database != null ? database : schema != null ? schema : "";
+    }
+
+    /** The first line that isn't blank or the header — a console's one-line preview. */
+    public static @NotNull String preview(@Nullable String sql) {
+        if (sql != null) {
+            for (String line : sql.split("\n")) {
+                String stripped = line.strip();
+                if (!stripped.isEmpty() && !stripped.startsWith(SqlConsole.SQL_HEADER)
+                        && !stripped.startsWith(SqlConsole.MONGO_HEADER)) {
+                    return stripped;
+                }
+            }
+        }
+        return "";
+    }
+
+    /** Runs on the EDT after consoles are added, removed, renamed, re-scoped, opened or closed. */
+    public void addListener(@NotNull Runnable listener, @NotNull Disposable parent) {
+        listeners.add(listener);
+        Disposer.register(parent, () -> listeners.remove(listener));
+    }
+
+    private void fireChanged() {
+        ApplicationManager.getApplication().invokeLater(() -> listeners.forEach(Runnable::run), project.getDisposed());
     }
 }
