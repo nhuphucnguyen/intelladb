@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-10-23
 
 #### Added
 - **Consoles in the tree**: each connection lists its saved consoles under a **consoles** node —
